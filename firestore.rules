@@ -160,11 +160,39 @@ service cloud.firestore {
       );
     }
 
+    /* ── contenido del panel ─────────────────────────────────────────────── */
+
+    /*  Noticias, encuestas, invitaciones y cronograma: lo que se carga desde
+     *  `/admin`. Lo escribe **el servidor** con el Admin SDK —las Server
+     *  Actions de `lib/contenido/actions.ts`, cada una detrás de
+     *  `requireAdmin()`— y lo lee también el servidor (las páginas del panel,
+     *  el feed, la landing de una invitación). El Admin SDK ignora estas
+     *  reglas, así que para el cliente las cuatro colecciones están cerradas:
+     *  publicar una noticia o abrir una votación no es un permiso que se pueda
+     *  derivar del token de quien escribe.
+     *
+     *  Explícito y no sólo por el catch-all: una colección que se sabe que
+     *  existe se cierra a propósito, no por descarte. */
+    match /trapnexport-noticia/{id}    { allow read, write: if false; }
+    match /trapnexport-encuesta/{id}   { allow read, write: if false; }
+    match /trapnexport-invitacion/{id} { allow read, write: if false; }
+    match /trapnexport-evento/{id}     { allow read, write: if false; }
+    match /trapnexport-config/{id}     { allow read, write: if false; }
+
+    /* ── trapnexport-notification ────────────────────────────────────────── */
+
+    /*  Avisos de campanita, un documento por destinatario. Los escribe el
+     *  servidor (`lib/social/notify.ts`) y los lee y marca `lib/social/*.ts`,
+     *  siempre con el Admin SDK. Cerrado al cliente como el resto del dominio
+     *  que todavía no pasa por reglas: cuando el feed tenga Firebase Auth de
+     *  verdad, acá irá `allow read: if isSelf(resource.data.userId)`. */
+    match /trapnexport-notification/{id} { allow read, write: if false; }
+
     /* ── todo lo demás ───────────────────────────────────────────────────── */
 
-    /*  El resto del dominio (publicaciones, comentarios, chat, contenido del
-     *  club) todavía vive en el store en memoria. Hasta que migre, cerrado:
-     *  una colección sin regla explícita no puede quedar abierta por olvido. */
+    /*  El resto del dominio (publicaciones, comentarios, chat) todavía vive en
+     *  el store en memoria. Hasta que migre, cerrado: una colección sin regla
+     *  explícita no puede quedar abierta por olvido. */
     match /{document=**} {
       allow read, write: if false;
     }

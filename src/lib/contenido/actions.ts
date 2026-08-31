@@ -1,8 +1,18 @@
 "use server";
 
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { revalidatePath } from "next/cache";
 
-import { contenidoDb, invitacionCode, newId } from "@/lib/contenido/store";
+import { requireAdmin } from "@/lib/admin/auth";
+import { adminDb } from "@/lib/firebase/admin";
+import { COL, CONFIG_CRONOGRAMA } from "@/lib/firebase/collections";
+import type {
+  EncuestaDoc,
+  InvitacionDoc,
+  NoticiaDoc,
+  OpcionEncuestaDoc,
+} from "@/lib/firebase/schema";
+import { invitacionCode, newId } from "@/lib/contenido/store";
 import {
   EFECTO_INVITACION,
   PLANTILLA_INVITACION,
@@ -20,20 +30,26 @@ import {
   type ResultadoMasivo,
   type RevelacionInvitacion,
 } from "@/lib/contenido/types";
-import { mediaUrl } from "@/lib/media";
 import { notifyAll } from "@/lib/social/notify";
 import { fromISODate, isoShort } from "@/lib/time";
 
 /** Escrituras del contenido del club, como Server Actions.
  *
  *  Mitad "write" del par con `queries.ts`. Los formularios del panel las llaman
- *  igual que a un fetch y no conocen el store. Cuando entre Firestore, cada
- *  cuerpo pasa a escribir en su colección; las firmas no cambian.
+ *  igual que a un fetch y no conocen la base. Van por el Admin SDK, que se
+ *  saltea `firestore.rules`: cargar una noticia o abrir una votación no es un
+ *  permiso que se pueda derivar del token de quien escribe, así que
+ *  `firestore.rules` deja estas colecciones cerradas a cualquier cliente y la
+ *  única puerta es esto.
+ *
+ *  Cada acción empieza por `requireAdmin()`. No es redundante con el guard de
+ *  la página: una Server Action es un endpoint POST que se puede invocar sin
+ *  pasar por ninguna pantalla.
  *
  *  Cada `saveX` es alta **y** modificación: sin `id` inserta, con `id`
  *  actualiza. Devuelven el id del registro guardado porque el panel lo
- *  necesita para dos cosas —abrir la tarjeta recién creada y armar el link de
- *  invitación— y volver a leer la tabla para encontrarlo sería un viaje de más.
+ *  necesita para abrir la tarjeta recién creada y para armar el link de
+ *  invitación.
  *
  *  Todas revalidan su ruta y `/admin`, que muestra los contadores.
  */
@@ -67,16 +83,26 @@ const isoDate = (v: string): string | null => {
   return back === v ? v : null;
 };
 
+/** Firestore rechaza `undefined` en un campo. Los opcionales (`descripcion`,
+ *  `cierra`, `media`) se omiten del objeto en vez de escribirse vacíos. */
+const sinVacios = <T extends Record<string, unknown>>(obj: T): T =>
+  Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as T;
+
 const revalidate = (path: string) => {
   revalidatePath(path);
   revalidatePath("/admin");
 };
 
-/** Aviso de campanita a toda la comunidad por un cambio del panel (cronograma o
- *  noticia). Además de crear las notificaciones revalida las superficies donde
- *  se ven: la lista dedicada y el feed, que es donde viven las dos solapas. */
-const avisar = (text: string, kind: "cronograma" | "noticia", description?: string) => {
-  notifyAll({ kind, text, description, href: "/" });
+/** Aviso de campanita a toda la comunidad por un cambio del panel (cronograma,
+ *  noticia o votación nueva). Además de crear las notificaciones revalida las
+ *  superficies donde se ven: la lista dedicada y el feed, que es donde viven
+ *  las solapas de cronograma y encuestas. */
+const avisar = async (
+  text: string,
+  kind: "cronograma" | "noticia" | "encuesta",
+  description?: string,
+) => {
+  await notifyAll({ kind, text, description, href: "/" });
   revalidatePath("/notificaciones");
   revalidatePath("/");
 };
@@ -84,8 +110,13 @@ const avisar = (text: string, kind: "cronograma" | "noticia", description?: stri
 /* ── noticias ────────────────────────────────────────────────────────────── */
 
 export async function saveNoticia(input: NoticiaInput): Promise<string | null> {
+  await requireAdmin();
+
   const titulo = text(input.titulo, 120);
   if (!titulo) return null;
+
+  const db = adminDb();
+  const col = db.collection(COL.noticia);
 
   const data = {
     titulo,
@@ -93,66 +124,72 @@ export async function saveNoticia(input: NoticiaInput): Promise<string | null> {
     cuerpo: text(input.cuerpo, 8000),
     estado: input.estado,
     autor: text(input.autor, 80) || "Prensa TNE",
-    destacada: input.destacada,
+    destacada: input.destacada ?? false,
   };
 
-  const existing = input.id
-    ? contenidoDb.noticias.find((n) => n.id === input.id)
-    : undefined;
+  const ref = input.id ? col.doc(input.id) : col.doc();
+  const prev = input.id ? await ref.get() : null;
+  const existing = prev?.exists ? (prev.data() as NoticiaDoc) : null;
+  if (input.id && !existing) return null;
 
-  // Una sola destacada por vez: marcar una apaga la anterior. Si no, la
-  // portada pública tendría que elegir entre dos y elegiría la primera del
-  // array, que es un orden que nadie controla desde el panel.
+  // Una sola destacada por vez: marcar una apaga la anterior. Si no, la portada
+  // pública tendría que elegir entre dos y elegiría una sin criterio.
+  const batch = db.batch();
   if (data.destacada) {
-    for (const n of contenidoDb.noticias) n.destacada = false;
+    const otras = await col.where("destacada", "==", true).get();
+    for (const d of otras.docs) {
+      if (d.id !== ref.id) batch.update(d.ref, { destacada: false });
+    }
   }
 
   if (existing) {
-    // Una noticia "nace" para la comunidad cuando pasa a publicada, sea al
-    // crearla así o al publicarla desde el borrador. Editar una ya publicada no
-    // vuelve a avisar.
-    const sePublica = existing.estado !== "publicada" && data.estado === "publicada";
-    Object.assign(existing, data, { updatedAt: Date.now() });
-    revalidate("/admin/noticias");
-    if (sePublica) avisar(`Nueva noticia: ${titulo}`, "noticia", data.copete || undefined);
-    return existing.id;
+    batch.update(ref, { ...data, updatedAt: FieldValue.serverTimestamp() });
+  } else {
+    batch.set(ref, {
+      ...data,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
   }
+  await batch.commit();
 
-  const id = newId("n");
-  contenidoDb.noticias.unshift({
-    ...data,
-    id,
-    cover: mediaUrl(titulo.slice(0, 24), id),
-    createdAt: Date.now(),
-  });
+  // Una noticia "nace" para la comunidad cuando pasa a publicada, sea al
+  // crearla así o al publicarla desde el borrador. Editar una ya publicada no
+  // vuelve a avisar.
+  const sePublica =
+    (existing?.estado ?? "borrador") !== "publicada" && data.estado === "publicada";
 
   revalidate("/admin/noticias");
-  if (data.estado === "publicada") {
-    avisar(`Nueva noticia: ${titulo}`, "noticia", data.copete || undefined);
-  }
-  return id;
+  if (sePublica) await avisar(`Nueva noticia: ${titulo}`, "noticia", data.copete || undefined);
+  return ref.id;
 }
 
 export async function setNoticiaEstado(id: string, estado: EstadoNoticia): Promise<void> {
-  const n = contenidoDb.noticias.find((x) => x.id === id);
-  if (!n) return;
+  await requireAdmin();
+
+  const ref = adminDb().collection(COL.noticia).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const n = snap.data() as NoticiaDoc;
 
   const sePublica = n.estado !== "publicada" && estado === "publicada";
-  n.estado = estado;
-  n.updatedAt = Date.now();
+  await ref.update({ estado, updatedAt: FieldValue.serverTimestamp() });
+
   revalidate("/admin/noticias");
-  if (sePublica) avisar(`Nueva noticia: ${n.titulo}`, "noticia", n.copete || undefined);
+  if (sePublica) await avisar(`Nueva noticia: ${n.titulo}`, "noticia", n.copete || undefined);
 }
 
 export async function deleteNoticia(id: string): Promise<void> {
-  const i = contenidoDb.noticias.findIndex((n) => n.id === id);
-  if (i !== -1) contenidoDb.noticias.splice(i, 1);
+  await requireAdmin();
+  await adminDb().collection(COL.noticia).doc(id).delete();
   revalidate("/admin/noticias");
 }
 
 /* ── encuestas ───────────────────────────────────────────────────────────── */
 
 export async function saveEncuesta(input: EncuestaInput): Promise<string | null> {
+  await requireAdmin();
+
   const pregunta = text(input.pregunta, 160);
   // Una opción vale si tiene texto **o** una URL de media: un video o una
   // imagen puede no llevar rótulo. `media` se recorta más largo porque es una
@@ -162,71 +199,85 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
     .filter((o) => o.texto || o.media);
   if (!pregunta || opciones.length < 2) return null;
 
-  const existing = input.id
-    ? contenidoDb.encuestas.find((e) => e.id === input.id)
-    : undefined;
+  const col = adminDb().collection(COL.encuesta);
+  const ref = input.id ? col.doc(input.id) : col.doc();
+  const prev = input.id ? await ref.get() : null;
+  const existing = prev?.exists ? (prev.data() as EncuestaDoc) : null;
+  if (input.id && !existing) return null;
 
-  const meta = {
+  const meta = sinVacios({
     pregunta,
     descripcion: text(input.descripcion ?? "", 320) || undefined,
     multiple: input.multiple,
     resultadosVisibles: input.resultadosVisibles,
     estado: input.estado,
     cierra: input.cierra || undefined,
-  };
+  });
 
   // La clave con la que se reconoce una opción entre ediciones: el texto, o la
   // URL de media cuando la opción no tiene texto.
   const clave = (o: { texto: string; media?: string }) => o.texto || o.media || "";
 
-  if (existing) {
-    // Editar una encuesta **no** borra los votos de las opciones que siguen.
-    // El match es por clave y no por posición: reordenar la lista en el
-    // formulario no tiene por qué mover los votos de una opción a otra. La
-    // media sí se pisa con lo último que se cargó.
-    existing.opciones = opciones.map((o) => {
-      const previa = existing.opciones.find((p) => clave(p) === clave(o));
-      return previa
-        ? { ...previa, texto: o.texto, media: o.media }
-        : { id: newId("o"), texto: o.texto, votos: 0, media: o.media };
-    });
-    Object.assign(existing, meta);
-
-    revalidate("/admin/encuestas");
-    return existing.id;
-  }
-
-  const id = newId("e");
-  contenidoDb.encuestas.unshift({
-    ...meta,
-    id,
-    opciones: opciones.map((o) => ({
-      id: newId("o"),
+  // Editar una encuesta **no** borra los votos de las opciones que siguen. El
+  // match es por clave y no por posición: reordenar la lista en el formulario
+  // no tiene por qué mover los votos de una opción a otra. La media sí se pisa
+  // con lo último que se cargó.
+  const previas = existing?.opciones ?? [];
+  const nuevasOpciones: OpcionEncuestaDoc[] = opciones.map((o) => {
+    const previa = previas.find((p) => clave(p) === clave(o));
+    return sinVacios({
+      id: previa?.id ?? newId("o"),
       texto: o.texto,
-      votos: 0,
+      votos: previa?.votos ?? 0,
       media: o.media,
-    })),
-    createdAt: Date.now(),
+    });
   });
 
+  if (existing) {
+    await ref.update({ ...meta, opciones: nuevasOpciones });
+  } else {
+    await ref.set({
+      ...meta,
+      opciones: nuevasOpciones,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+
+  // Una votación "nace" para la comunidad cuando queda abierta —sea al crearla
+  // así o al abrirla desde el borrador—. Un borrador no se ve en el feed, así
+  // que avisar de uno mandaría a votar algo que no está. Editar una ya abierta
+  // no vuelve a avisar. Mismo criterio que `saveNoticia` con `publicada`.
+  const seAbre = (existing?.estado ?? "borrador") !== "abierta" && meta.estado === "abierta";
+
   revalidate("/admin/encuestas");
-  return id;
+  if (seAbre) await avisar(`Nueva votación: ${pregunta}`, "encuesta", meta.descripcion);
+  return ref.id;
 }
 
 export async function setEncuestaEstado(
   id: string,
   estado: EstadoEncuesta,
 ): Promise<void> {
-  const e = contenidoDb.encuestas.find((x) => x.id === id);
-  if (!e) return;
+  await requireAdmin();
 
-  e.estado = estado;
+  const ref = adminDb().collection(COL.encuesta).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const e = snap.data() as EncuestaDoc;
+
+  await ref.update({ estado });
+
+  // borrador → abierta es el momento en que la votación se hace pública: avisa
+  // a la comunidad, igual que publicar una noticia. Cerrarla no notifica.
+  const seAbre = e.estado !== "abierta" && estado === "abierta";
+
   revalidate("/admin/encuestas");
+  if (seAbre) await avisar(`Nueva votación: ${e.pregunta}`, "encuesta", e.descripcion);
 }
 
 export async function deleteEncuesta(id: string): Promise<void> {
-  const i = contenidoDb.encuestas.findIndex((e) => e.id === id);
-  if (i !== -1) contenidoDb.encuestas.splice(i, 1);
+  await requireAdmin();
+  await adminDb().collection(COL.encuesta).doc(id).delete();
   revalidate("/admin/encuestas");
 }
 
@@ -241,6 +292,8 @@ const EFECTOS = Object.keys(EFECTO_INVITACION) as EfectoInvitacion[];
 const REVELACIONES = Object.keys(REVELACION_INVITACION) as RevelacionInvitacion[];
 
 export async function saveInvitacion(input: InvitacionInput): Promise<string | null> {
+  await requireAdmin();
+
   const invitado = text(input.invitado, 80);
   const titulo = text(input.titulo, 120);
   if (!invitado || !titulo || !input.fecha) return null;
@@ -258,34 +311,40 @@ export async function saveInvitacion(input: InvitacionInput): Promise<string | n
     estado: input.estado,
   };
 
-  const existing = input.id
-    ? contenidoDb.invitaciones.find((i) => i.id === input.id)
-    : undefined;
+  const col = adminDb().collection(COL.invitacion);
 
-  if (existing) {
+  if (input.id) {
+    const ref = col.doc(input.id);
+    const snap = await ref.get();
+    if (!snap.exists) return null;
+    const existing = snap.data() as InvitacionDoc;
+
     // El `code` no se toca al editar, ni siquiera si cambia el nombre del
     // invitado: el link ya está mandado y romperlo desde el panel sería
     // invalidar una invitación sin querer.
-    Object.assign(existing, data);
+    await ref.update(data);
     revalidate("/admin/invitaciones");
     revalidatePath(`/invitacion/${existing.code}`);
-    return existing.id;
+    return ref.id;
   }
 
-  const id = newId("i");
+  const ref = col.doc();
   const code = invitacionCode(invitado, titulo);
-  contenidoDb.invitaciones.unshift({ ...data, id, code, createdAt: Date.now() });
+  await ref.set({ ...data, code, createdAt: FieldValue.serverTimestamp() });
 
   revalidate("/admin/invitaciones");
-  return id;
+  return ref.id;
 }
 
 /** Cuántas invitaciones admite un solo pegado.
  *
- *  El tope no es por rendimiento —crear mil filas en memoria no cuesta nada—
- *  sino porque una lista de más de trescientos nombres casi siempre es un
- *  pegado equivocado: una planilla entera, una columna de más. Cortar y avisar
- *  es mejor que generar seiscientos links que después hay que borrar de a uno.
+ *  El tope no es por rendimiento —crear mil filas no cuesta casi nada— sino
+ *  porque una lista de más de trescientos nombres casi siempre es un pegado
+ *  equivocado: una planilla entera, una columna de más. Cortar y avisar es
+ *  mejor que generar seiscientos links que después hay que borrar de a uno.
+ *
+ *  Además, un batch de Firestore admite 500 escrituras: con el tope en 300 el
+ *  alta masiva entra siempre en un solo commit atómico.
  */
 const TOPE_MASIVO = 300;
 
@@ -295,7 +354,7 @@ const TOPE_MASIVO = 300;
 const claveNombre = (v: string) =>
   v
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(new RegExp(`[${String.fromCharCode(0x300)}-${String.fromCharCode(0x36f)}]`, "g"), "")
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
@@ -304,7 +363,7 @@ const claveNombre = (v: string) =>
  *
  *  Cada una recibe su propio `code` y por lo tanto su propio link: es lo que
  *  hace que sean invitaciones personales y no un link compartido con ochenta
- *  personas. Por eso tampoco se pueden reusar entre sí ni deducir uno del otro.
+ *  personas.
  *
  *  Los repetidos se **saltean, no se rechazan**. El caso real es pegar la lista
  *  dos veces —o agregarle diez nombres al final y volver a pegarla entera—, y
@@ -315,6 +374,8 @@ const claveNombre = (v: string) =>
 export async function saveInvitacionesMasivas(
   input: InvitacionMasivaInput,
 ): Promise<ResultadoMasivo> {
+  await requireAdmin();
+
   const titulo = text(input.titulo, 120);
   const fecha = isoDate(input.fecha);
   if (!titulo || !fecha) {
@@ -349,17 +410,27 @@ export async function saveInvitacionesMasivas(
     estado: input.estado,
   };
 
+  const db = adminDb();
+  const col = db.collection(COL.invitacion);
+
   // Las que ya existen para este evento, y las que se repiten dentro del mismo
   // pegado: las dos se saltean con el mismo criterio.
+  const yaCargadas = await col
+    .where("titulo", "==", titulo)
+    .where("fecha", "==", fecha)
+    .get();
   const vistos = new Set(
-    contenidoDb.invitaciones
-      .filter((i) => i.titulo === titulo && i.fecha === fecha)
-      .map((i) => claveNombre(i.invitado)),
+    yaCargadas.docs.map((d) => claveNombre((d.data() as InvitacionDoc).invitado)),
   );
 
-  const nuevas: typeof contenidoDb.invitaciones = [];
+  const batch = db.batch();
   const repetidos: string[] = [];
+  // El índice **resta** de `createdAt`: creadas todas casi en el mismo instante,
+  // la tabla —que ordena por `createdAt` descendente— las mostraría barajadas;
+  // restando, la primera de la lista es la más nueva y la tanda se lee en el
+  // mismo orden en que se pegó.
   const ahora = Date.now();
+  let creadas = 0;
 
   nombres.forEach((invitado, i) => {
     const clave = claveNombre(invitado);
@@ -368,53 +439,56 @@ export async function saveInvitacionesMasivas(
       return;
     }
     vistos.add(clave);
-    nuevas.push({
+    batch.set(col.doc(), {
       ...comunes,
       invitado,
-      id: newId("i"),
       code: invitacionCode(invitado, titulo),
-      // El índice **resta**, y eso ordena la tanda. Creadas todas en el mismo
-      // milisegundo, la tabla —que ordena por `createdAt` descendente— las
-      // mostraría barajadas; restando, la primera de la lista es la más nueva
-      // y la tanda se lee en la tabla en el mismo orden en que se pegó.
-      createdAt: ahora - i,
+      createdAt: Timestamp.fromMillis(ahora - i),
     });
+    creadas++;
   });
 
-  // Un solo `unshift` y no uno por nombre: `unshift` mueve el array entero en
-  // cada llamada, y con trescientas invitaciones eso son trescientos corrimientos
-  // de una lista que ya viene creciendo.
-  contenidoDb.invitaciones.unshift(...nuevas);
+  if (creadas) await batch.commit();
 
   revalidate("/admin/invitaciones");
-  return { creadas: nuevas.length, repetidos };
+  return { creadas, repetidos };
 }
 
 export async function setInvitacionEstado(
   id: string,
   estado: EstadoInvitacion,
 ): Promise<void> {
-  const inv = contenidoDb.invitaciones.find((x) => x.id === id);
-  if (!inv) return;
+  await requireAdmin();
 
-  inv.estado = estado;
+  const ref = adminDb().collection(COL.invitacion).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const inv = snap.data() as InvitacionDoc;
+
+  await ref.update({ estado });
   revalidate("/admin/invitaciones");
   // Revocar tiene que apagar el link ya servido, no sólo la fila del panel.
   revalidatePath(`/invitacion/${inv.code}`);
 }
 
 export async function deleteInvitacion(id: string): Promise<void> {
-  const i = contenidoDb.invitaciones.findIndex((x) => x.id === id);
-  if (i === -1) return;
+  await requireAdmin();
 
-  const [gone] = contenidoDb.invitaciones.splice(i, 1);
+  const ref = adminDb().collection(COL.invitacion).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const inv = snap.data() as InvitacionDoc;
+
+  await ref.delete();
   revalidate("/admin/invitaciones");
-  revalidatePath(`/invitacion/${gone.code}`);
+  revalidatePath(`/invitacion/${inv.code}`);
 }
 
 /* ── cronograma ──────────────────────────────────────────────────────────── */
 
 export async function saveEvento(input: EventoInput): Promise<string | null> {
+  await requireAdmin();
+
   const nombre = text(input.nombre, 120);
   // Sin fecha: el evento hereda el día del cronograma. Lo único obligatorio
   // que queda es el nombre — la hora tiene un default razonable y el día no se
@@ -432,51 +506,67 @@ export async function saveEvento(input: EventoInput): Promise<string | null> {
     tipo: input.tipo,
   };
 
-  const existing = input.id
-    ? contenidoDb.eventos.find((e) => e.id === input.id)
-    : undefined;
+  const col = adminDb().collection(COL.evento);
+  const ref = input.id ? col.doc(input.id) : col.doc();
 
-  if (existing) {
-    Object.assign(existing, data);
+  if (input.id) {
+    const snap = await ref.get();
+    if (!snap.exists) return null;
+    await ref.update(data);
     revalidate("/admin/cronograma");
-    avisar(`Cambió un evento del cronograma: ${nombre}`, "cronograma", data.descripcion || undefined);
-    return existing.id;
+    await avisar(
+      `Cambió un evento del cronograma: ${nombre}`,
+      "cronograma",
+      data.descripcion || undefined,
+    );
+    return ref.id;
   }
 
-  const id = newId("ev");
-  contenidoDb.eventos.push({ ...data, id, createdAt: Date.now() });
-
+  await ref.set({ ...data, createdAt: FieldValue.serverTimestamp() });
   revalidate("/admin/cronograma");
-  avisar(`Nuevo evento en el cronograma: ${nombre}`, "cronograma", `${data.hora} · ${data.lugar || "a confirmar"}`);
-  return id;
+  await avisar(
+    `Nuevo evento en el cronograma: ${nombre}`,
+    "cronograma",
+    `${data.hora} · ${data.lugar || "a confirmar"}`,
+  );
+  return ref.id;
 }
 
 export async function deleteEvento(id: string): Promise<void> {
-  const i = contenidoDb.eventos.findIndex((e) => e.id === id);
-  if (i === -1) return;
+  await requireAdmin();
 
-  const [borrado] = contenidoDb.eventos.splice(i, 1);
+  const ref = adminDb().collection(COL.evento).doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const { nombre } = snap.data() as { nombre: string };
+
+  await ref.delete();
   revalidate("/admin/cronograma");
-  avisar(`Se quitó del cronograma: ${borrado.nombre}`, "cronograma");
+  await avisar(`Se quitó del cronograma: ${nombre}`, "cronograma");
 }
 
 /** Mueve el cronograma entero a otro día. Devuelve la fecha guardada, o `null`
  *  si no era una fecha válida.
  *
- *  Escribe **un** campo, no N eventos: como los eventos guardan sólo la hora
- *  (ver `Evento` en `types.ts`), cambiar el día es atómico por construcción y
- *  no existe el estado intermedio de "la mitad se movió". Los horarios no se
- *  tocan: el programa del día es el mismo, corrido de fecha.
+ *  Escribe **un** campo del documento `trapnexport-config/cronograma`, no N
+ *  eventos: como los eventos guardan sólo la hora, cambiar el día es atómico
+ *  por construcción y no existe el estado intermedio de "la mitad se movió".
+ *  Los horarios no se tocan: el programa del día es el mismo, corrido de fecha.
  */
 export async function setFechaEvento(fecha: string): Promise<string | null> {
+  await requireAdmin();
+
   const iso = isoDate(fecha);
   if (!iso) return null;
 
-  const anterior = contenidoDb.fechaEvento;
-  contenidoDb.fechaEvento = iso;
+  const ref = adminDb().collection(COL.config).doc(CONFIG_CRONOGRAMA);
+  const anterior = (await ref.get()).data()?.fecha as string | undefined;
+
+  await ref.set({ fecha: iso, updatedAt: FieldValue.serverTimestamp() });
+
   revalidate("/admin/cronograma");
   if (iso !== anterior) {
-    avisar(`El cronograma se movió al ${isoShort(iso)}`, "cronograma");
+    await avisar(`El cronograma se movió al ${isoShort(iso)}`, "cronograma");
   }
   return iso;
 }

@@ -116,16 +116,26 @@ escribe exactamente lo mismo que el feed.
 
 ```
 src/lib/social/types.ts     Modelo de dominio (User, Post, CommentRow, Report…).
-src/lib/social/store.ts     Base en memoria + semilla. ← lo único que cambia con Firestore.
+src/lib/social/store.ts     Feed/comentarios/chat en memoria. Sin datos de relleno: sólo el plantel real y una sesión simulada.
 src/lib/social/queries.ts   Lecturas, ya mapeadas a los props de los componentes.
 src/lib/social/actions.ts   Escrituras como Server Actions, con revalidatePath.
+src/lib/social/notify.ts    Alta de avisos de campanita → Firestore (trapnexport-notification).
 src/lib/historia.ts         Historia del club: contenido editorial, fuera del dominio social.
 
 src/lib/contenido/types.ts     Modelo del contenido del panel + etiquetas compartidas.
-src/lib/contenido/store.ts     Base en memoria + semilla. ← lo único que cambia con Firestore.
-src/lib/contenido/queries.ts   Lecturas, ya mapeadas a las filas del panel.
-src/lib/contenido/actions.ts   Escrituras como Server Actions, con revalidatePath.
+src/lib/contenido/store.ts     Generadores de id/código. El resto migró a Firestore.
+src/lib/contenido/queries.ts   Lecturas de Firestore (Admin SDK), mapeadas a las filas del panel.
+src/lib/contenido/actions.ts   Escrituras a Firestore como Server Actions, cada una con requireAdmin().
 ```
+
+`contenido/` ya está sobre Firestore: `trapnexport-noticia`, `-encuesta`,
+`-invitacion`, `-evento` y el doc `trapnexport-config/cronograma` (el día que
+comparten los eventos). Todo pasa por el Admin SDK —lecturas en Server
+Components, escrituras en Server Actions detrás de `requireAdmin()`— así que
+`firestore.rules` deja esas colecciones cerradas al cliente. `npm run
+seed:contenido` carga **sólo** las encuestas de los Trap Awards (idempotente: no
+pisa votos); noticias, invitaciones y el día del cronograma nacen vacíos y se
+cargan desde `/admin` (el cronograma cae a "hoy" hasta que se elija fecha).
 
 `contenido/` es un módulo aparte de `social/` y no una carpeta más adentro: son
 dos ciclos de vida distintos. `social/` lo escriben los usuarios y el panel sólo
@@ -142,10 +152,14 @@ medianoche y en Argentina devuelve el día anterior.
 
 Las pantallas nunca tocan `store.ts`: piden un view-model a `queries.ts` y
 mutan por `actions.ts`. Migrar a Firestore es reescribir el cuerpo de esas dos
-capas; las firmas y las pantallas no se tocan.
+capas; las firmas y las pantallas no se tocan. Ya cruzaron `contenido/` entero
+y las **notificaciones** de `social/` (`trapnexport-notification`, un documento
+por destinatario, escrito con el Admin SDK y con el fan-out sobre las cuentas
+reales de `trapnexport-user`). El feed, los comentarios y el chat de `social/`
+siguen en el store en memoria.
 
-El store vive en `globalThis` a propósito: sin eso, en `next dev` cada
-recompilación borraría lo que publicaste.
+Lo que queda del store en memoria (`social/store.ts`) vive en `globalThis` a
+propósito: sin eso, en `next dev` cada recompilación borraría lo que publicaste.
 
 Los avatares y la media son **data-URI SVG** generados en `src/lib/media.ts`:
 deterministas por handle, sin depender de ningún host. Cuando haya storage real,

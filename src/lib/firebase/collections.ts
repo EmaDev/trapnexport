@@ -18,7 +18,32 @@ export const COL = {
   jugador: `${PREFIX}-jugador`,
   /** reserva de handles: un doc por handle tomado. Ver `HandleDoc`. */
   handle: `${PREFIX}-handle`,
+
+  /* ── contenido que administra el panel (`lib/contenido/`) ───────────────── */
+  /** noticias del club. Ver `NoticiaDoc`. */
+  noticia: `${PREFIX}-noticia`,
+  /** encuestas / votaciones. El id de las semilla es el del premio. Ver `EncuestaDoc`. */
+  encuesta: `${PREFIX}-encuesta`,
+  /** invitaciones con link propio. Ver `InvitacionDoc`. */
+  invitacion: `${PREFIX}-invitacion`,
+  /** eventos del cronograma. No guardan fecha: la comparten. Ver `EventoDoc`. */
+  evento: `${PREFIX}-evento`,
+  /** ajustes de una sola fila del panel (hoy: el día del cronograma). */
+  config: `${PREFIX}-config`,
+
+  /** avisos de campanita: un documento por destinatario. Los escribe el
+   *  servidor (`lib/social/notify.ts`) y los lee `social/queries.ts`. Ver
+   *  `NotificacionDoc`. */
+  notificacion: `${PREFIX}-notification`,
 } as const;
+
+/** El único documento dentro de `trapnexport-config`.
+ *
+ *  El cronograma es de un solo día y esa fecha vive una sola vez, acá, en vez
+ *  de repetirse en cada evento —donde dos podrían quedar con días distintos—.
+ *  Ruta completa: `trapnexport-config/cronograma`. Ver `CronogramaConfigDoc`.
+ */
+export const CONFIG_CRONOGRAMA = "cronograma";
 
 /** Subcolecciones de `trapnexport-user/{uid}`.
  *

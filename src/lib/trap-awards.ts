@@ -8,8 +8,9 @@
  *  traducen a lo que consume cada pantalla:
  *
  *    JUGADORES    → las cuentas del feed y los perfiles de /historia
- *    PREMIOS      → las encuestas del panel (`lib/contenido/store.ts`) y las
- *                   tarjetas de votación del feed (`components/organisms/FeedTabs`)
+ *    PREMIOS      → las encuestas del panel (las siembra `scripts/seed-contenido.mjs`
+ *                   en `trapnexport-encuesta`) y las tarjetas de votación del
+ *                   feed (`components/organisms/FeedTabs`)
  *    opcionesDe() → los textos de las opciones de un premio, en los dos lados
  *
  *  No importa nada de `store.ts` ni de `next/*`: lo leen tanto el servidor como

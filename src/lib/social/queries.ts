@@ -1,3 +1,6 @@
+import { adminDb } from "@/lib/firebase/admin";
+import { COL } from "@/lib/firebase/collections";
+import type { NotificacionDoc } from "@/lib/firebase/schema";
 import { db } from "@/lib/social/store";
 import type { GalleryItem, NotificationKind, PlayerFicha, User } from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
@@ -332,28 +335,36 @@ const NOTIF_META: Record<
   message: { description: "Tocá para abrir la conversación", tone: "info" },
   cronograma: { description: "Tocá para ver el cronograma", tone: "warning" },
   noticia: { description: "Tocá para leer la noticia", tone: "info" },
+  encuesta: { description: "Tocá para votar", tone: "info" },
 };
 
 export async function getNotifications(): Promise<NotificationVM[]> {
   const viewerId = db.currentUserId;
 
-  return db.notifications
-    .filter((n) => n.userId === viewerId)
-    .sort((a, b) => b.at - a.at)
-    .map((n) => {
-      const meta = NOTIF_META[n.kind] ?? NOTIF_META.post;
-      return {
-        id: n.id,
-        title: n.text,
-        description: n.description ?? meta.description,
-        date: n.at,
-        read: !!n.read,
-        // Los avisos de plataforma no tienen actor: ahí manda el `tone`.
-        avatar: n.actorId ? userById(n.actorId)?.avatar : undefined,
-        href: n.href,
-        tone: meta.tone,
-      };
-    });
+  const snap = await adminDb()
+    .collection(COL.notificacion)
+    .where("userId", "==", viewerId)
+    .orderBy("createdAt", "desc")
+    // El historial no es infinito: la pantalla y el drawer muestran los más
+    // nuevos, y nadie baja cien avisos.
+    .limit(100)
+    .get();
+
+  return snap.docs.map((d) => {
+    const n = d.data() as NotificacionDoc;
+    const meta = NOTIF_META[n.kind] ?? NOTIF_META.post;
+    return {
+      id: d.id,
+      title: n.text,
+      description: n.description ?? meta.description,
+      date: n.createdAt?.toMillis() ?? Date.now(),
+      read: !!n.read,
+      // Los avisos de plataforma no tienen actor: ahí manda el `tone`.
+      avatar: n.actorId ? userById(n.actorId)?.avatar : undefined,
+      href: n.href,
+      tone: meta.tone,
+    };
+  });
 }
 
 /* ── admin ───────────────────────────────────────────────────────────────── */

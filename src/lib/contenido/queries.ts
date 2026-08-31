@@ -1,27 +1,62 @@
-import { contenidoDb } from "@/lib/contenido/store";
+import { adminDb } from "@/lib/firebase/admin";
+import { COL, CONFIG_CRONOGRAMA } from "@/lib/firebase/collections";
+import type {
+  CronogramaConfigDoc,
+  EncuestaDoc,
+  EventoDoc,
+  InvitacionDoc,
+  NoticiaDoc,
+} from "@/lib/firebase/schema";
 import type { Encuesta, Evento, Invitacion, Noticia } from "@/lib/contenido/types";
 import { absoluteUrl } from "@/lib/site";
-import { dateTime, fromISODate, horaMas, isoShort, longDate } from "@/lib/time";
+import { dateTime, fromISODate, horaMas, isoShort, longDate, shortDate } from "@/lib/time";
 
 /** Lecturas del contenido del club, ya mapeadas a lo que esperan las pantallas.
  *
- *  Mitad "read" del par con `actions.ts`. Cada fila **extiende la entidad** en
- *  vez de proyectar un subconjunto: la tabla del panel muestra la versión
- *  formateada (`fecha`, `creada`) y el formulario de edición se prellena con
- *  los campos crudos de la misma fila. Proyectar sólo lo visible obligaría a
- *  pedir la entidad de nuevo al abrir el modal.
+ *  Mitad "read" del par con `actions.ts`. Va con el Admin SDK —que se saltea
+ *  `firestore.rules`— porque todo lo que la llama corre en el servidor: las
+ *  páginas de `/admin`, el feed (`getCronograma`) y la ruta pública de una
+ *  invitación (`getInvitacionByCode`).
+ *
+ *  Cada fila **extiende la entidad de dominio** en vez de proyectar un
+ *  subconjunto: la tabla del panel muestra la versión formateada (`creada`,
+ *  `cuando`) y el formulario de edición se prellena con los campos crudos de la
+ *  misma fila. Los `XDoc` de `firebase/schema.ts` describen el documento
+ *  guardado; el mapper de acá los baja a las entidades de `types.ts`, cuya
+ *  única diferencia es que `createdAt` es `number` y no `Timestamp`.
  */
+
+/** Un `Timestamp` de Firestore a milisegundos. `?? Date.now()` cubre la ventana
+ *  en la que `serverTimestamp()` todavía no fue confirmado por el servidor y el
+ *  campo llega `null`. Mismo helper que en `admin/cuentas.ts`. */
+const millis = (ts: { toMillis(): number } | null | undefined) =>
+  ts?.toMillis() ?? Date.now();
 
 /* ── noticias ────────────────────────────────────────────────────────────── */
 
 export interface NoticiaRow extends Noticia {
-  /** `createdAt` formateado, que es lo que se muestra en la tabla */
+  /** `updatedAt` (o `createdAt`) formateado, que es lo que se muestra en la tabla */
   creada: string;
 }
 
+const aNoticia = (id: string, d: NoticiaDoc): Noticia => ({
+  id,
+  titulo: d.titulo,
+  copete: d.copete,
+  cuerpo: d.cuerpo,
+  cover: d.cover,
+  estado: d.estado,
+  autor: d.autor,
+  createdAt: millis(d.createdAt),
+  updatedAt: d.updatedAt ? millis(d.updatedAt) : undefined,
+  destacada: d.destacada || undefined,
+});
+
 export async function getNoticias(): Promise<NoticiaRow[]> {
-  return [...contenidoDb.noticias]
-    .sort((a, b) => b.createdAt - a.createdAt)
+  const snap = await adminDb().collection(COL.noticia).orderBy("createdAt", "desc").get();
+
+  return snap.docs
+    .map((doc) => aNoticia(doc.id, doc.data() as NoticiaDoc))
     .map((n) => ({ ...n, creada: dateTime(n.updatedAt ?? n.createdAt) }));
 }
 
@@ -34,6 +69,23 @@ export interface EncuestaRow extends Encuesta {
   cierre: string;
 }
 
+const aEncuesta = (id: string, d: EncuestaDoc): Encuesta => ({
+  id,
+  pregunta: d.pregunta,
+  descripcion: d.descripcion,
+  opciones: (d.opciones ?? []).map((o) => ({
+    id: o.id,
+    texto: o.texto,
+    votos: o.votos ?? 0,
+    media: o.media,
+  })),
+  multiple: d.multiple,
+  resultadosVisibles: d.resultadosVisibles,
+  estado: d.estado,
+  cierra: d.cierra,
+  createdAt: millis(d.createdAt),
+});
+
 const cierreLabel = (e: Encuesta): string => {
   if (e.estado === "cerrada") return "Cerrada";
   if (!e.cierra) return "Sin fecha de cierre";
@@ -41,8 +93,10 @@ const cierreLabel = (e: Encuesta): string => {
 };
 
 export async function getEncuestas(): Promise<EncuestaRow[]> {
-  return [...contenidoDb.encuestas]
-    .sort((a, b) => b.createdAt - a.createdAt)
+  const snap = await adminDb().collection(COL.encuesta).orderBy("createdAt", "desc").get();
+
+  return snap.docs
+    .map((doc) => aEncuesta(doc.id, doc.data() as EncuestaDoc))
     .map((e) => ({
       ...e,
       totalVotos: e.opciones.reduce((n, o) => n + o.votos, 0),
@@ -60,6 +114,22 @@ export interface InvitacionRow extends Invitacion {
   creada: string;
 }
 
+const aInvitacion = (id: string, d: InvitacionDoc): Invitacion => ({
+  id,
+  code: d.code,
+  invitado: d.invitado,
+  titulo: d.titulo,
+  mensaje: d.mensaje,
+  fecha: d.fecha,
+  hora: d.hora,
+  lugar: d.lugar,
+  plantilla: d.plantilla,
+  efecto: d.efecto,
+  revelacion: d.revelacion,
+  estado: d.estado,
+  createdAt: millis(d.createdAt),
+});
+
 /** El link es absoluto y sale de `absoluteUrl`, el mismo helper que el
  *  `canonical` de cada ruta: si el panel copiara un link relativo o armado a
  *  mano, el preview de WhatsApp se resolvería contra otro host que el que abre
@@ -69,8 +139,13 @@ const invitacionUrl = (code: string) => absoluteUrl(`/invitacion/${code}`);
 const cuandoLabel = (fecha: string, hora: string) => `${isoShort(fecha)} · ${hora}`;
 
 export async function getInvitaciones(): Promise<InvitacionRow[]> {
-  return [...contenidoDb.invitaciones]
-    .sort((a, b) => b.createdAt - a.createdAt)
+  const snap = await adminDb()
+    .collection(COL.invitacion)
+    .orderBy("createdAt", "desc")
+    .get();
+
+  return snap.docs
+    .map((doc) => aInvitacion(doc.id, doc.data() as InvitacionDoc))
     .map((i) => ({
       ...i,
       url: invitacionUrl(i.code),
@@ -84,8 +159,17 @@ export async function getInvitaciones(): Promise<InvitacionRow[]> {
  *  Devuelve `null` también para las revocadas: una invitación dada de baja
  *  tiene que dejar de abrir, no mostrar la tarjeta con un cartel. */
 export async function getInvitacionByCode(code: string): Promise<Invitacion | null> {
-  const found = contenidoDb.invitaciones.find((i) => i.code === code);
-  return found && found.estado === "activa" ? found : null;
+  const snap = await adminDb()
+    .collection(COL.invitacion)
+    .where("code", "==", code)
+    .limit(1)
+    .get();
+
+  const doc = snap.docs[0];
+  if (!doc) return null;
+
+  const inv = aInvitacion(doc.id, doc.data() as InvitacionDoc);
+  return inv.estado === "activa" ? inv : null;
 }
 
 /* ── cronograma ──────────────────────────────────────────────────────────── */
@@ -126,11 +210,42 @@ export interface Cronograma {
   eventos: EventoRow[];
 }
 
-export async function getEventos(): Promise<EventoRow[]> {
-  const now = Date.now();
-  const fecha = contenidoDb.fechaEvento;
+/** "YYYY-MM-DD" de hoy, en hora local. El fallback cuando todavía nadie fijó el
+ *  día del cronograma: mejor que un mes vacío en el calendario del panel. */
+const hoyISO = (): string => {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
 
-  return [...contenidoDb.eventos]
+/** El día en que ocurre todo el cronograma. Documento único
+ *  `trapnexport-config/cronograma`; si no existe, hoy. */
+export async function getFechaCronograma(): Promise<string> {
+  const snap = await adminDb().collection(COL.config).doc(CONFIG_CRONOGRAMA).get();
+  const d = snap.data() as CronogramaConfigDoc | undefined;
+  return d?.fecha ?? hoyISO();
+}
+
+const aEvento = (id: string, d: EventoDoc): Evento => ({
+  id,
+  nombre: d.nombre,
+  descripcion: d.descripcion,
+  hora: d.hora,
+  duracion: d.duracion,
+  lugar: d.lugar,
+  tipo: d.tipo,
+  createdAt: millis(d.createdAt),
+});
+
+export async function getEventos(fechaConocida?: string): Promise<EventoRow[]> {
+  const now = Date.now();
+  const [fecha, snap] = await Promise.all([
+    fechaConocida ? Promise.resolve(fechaConocida) : getFechaCronograma(),
+    adminDb().collection(COL.evento).get(),
+  ]);
+
+  return snap.docs
+    .map((doc) => aEvento(doc.id, doc.data() as EventoDoc))
     .map((e) => {
       const startsAt = fromISODate(fecha, e.hora).getTime();
       const { hora: fin, diaSiguiente } = horaMas(e.hora, e.duracion);
@@ -151,13 +266,78 @@ export async function getEventos(): Promise<EventoRow[]> {
 }
 
 export async function getCronograma(): Promise<Cronograma> {
-  const fecha = contenidoDb.fechaEvento;
+  const fecha = await getFechaCronograma();
 
   return {
     fecha,
     fechaLarga: longDate(fecha),
-    eventos: await getEventos(),
+    eventos: await getEventos(fecha),
   };
+}
+
+/* ── el feed público ─────────────────────────────────────────────────────── */
+
+/** Una encuesta como la consume la solapa "Premios" del feed.
+ *
+ *  Es la misma colección que edita el panel; el feed sólo se queda con lo que
+ *  necesita para mostrar el `Poll` y votar. Las cerradas no viajan —el feed no
+ *  muestra resultados y una votación cerrada no acepta más votos—; las que no
+ *  están abiertas todavía (borrador, típicamente los premios de video) viajan
+ *  con `proximamente: true` para dibujarlas grises, sin `Poll`.
+ */
+export interface EncuestaFeedVM {
+  id: string;
+  pregunta: string;
+  descripcion?: string;
+  multiple: boolean;
+  /** todavía no se puede votar: se muestra la lista de opciones en gris */
+  proximamente: boolean;
+  opciones: { id: string; texto: string; media?: string }[];
+}
+
+export async function getEncuestasFeed(): Promise<EncuestaFeedVM[]> {
+  // Ascendente: el feed las lista en el orden en que se anuncian en la gala,
+  // que es el de la semilla (`createdAt` escalonado por premio).
+  const snap = await adminDb().collection(COL.encuesta).orderBy("createdAt", "asc").get();
+
+  return snap.docs
+    .map((doc) => aEncuesta(doc.id, doc.data() as EncuestaDoc))
+    .filter((e) => e.estado !== "cerrada")
+    .map((e) => ({
+      id: e.id,
+      pregunta: e.pregunta,
+      descripcion: e.descripcion,
+      multiple: e.multiple,
+      proximamente: e.estado !== "abierta",
+      opciones: e.opciones.map((o) => ({ id: o.id, texto: o.texto, media: o.media })),
+    }));
+}
+
+/** Una noticia publicada, para la solapa "Noticias" del feed. */
+export interface NoticiaFeedVM {
+  id: string;
+  titulo: string;
+  copete: string;
+  cuerpo: string;
+  autor: string;
+  /** "14 mar 2026" — la fecha del último cambio, ya formateada */
+  fecha: string;
+}
+
+export async function getNoticiasFeed(): Promise<NoticiaFeedVM[]> {
+  const snap = await adminDb().collection(COL.noticia).orderBy("createdAt", "desc").get();
+
+  return snap.docs
+    .map((doc) => aNoticia(doc.id, doc.data() as NoticiaDoc))
+    .filter((n) => n.estado === "publicada")
+    .map((n) => ({
+      id: n.id,
+      titulo: n.titulo,
+      copete: n.copete,
+      cuerpo: n.cuerpo,
+      autor: n.autor,
+      fecha: shortDate(n.updatedAt ?? n.createdAt),
+    }));
 }
 
 /* ── el panel ────────────────────────────────────────────────────────────── */
@@ -178,25 +358,50 @@ export interface ContenidoStats {
 }
 
 export async function getContenidoStats(): Promise<ContenidoStats> {
+  const db = adminDb();
   const now = Date.now();
-  const { noticias, encuestas, invitaciones, fechaEvento, eventos } = contenidoDb;
+
+  const [
+    noticias,
+    noticiasBorrador,
+    encuestasSnap,
+    invitaciones,
+    invitacionesActivas,
+    fecha,
+    eventos,
+  ] = await Promise.all([
+    db.collection(COL.noticia).count().get(),
+    db.collection(COL.noticia).where("estado", "==", "borrador").count().get(),
+    // Los votos se suman de las opciones de cada encuesta, que son un array
+    // embebido: no hay `count()` que los cuente sin traer los documentos. Son
+    // pocas encuestas, así que el costo es bajo.
+    db.collection(COL.encuesta).get(),
+    db.collection(COL.invitacion).count().get(),
+    db.collection(COL.invitacion).where("estado", "==", "activa").count().get(),
+    getFechaCronograma(),
+    db.collection(COL.evento).get(),
+  ]);
+
+  const encuestas = encuestasSnap.docs.map((d) => d.data() as EncuestaDoc);
+  const eventosProximos = eventos.docs.filter((d) => {
+    const e = d.data() as EventoDoc;
+    return fromISODate(fecha, e.hora).getTime() >= now;
+  }).length;
 
   return {
-    noticias: noticias.length,
-    noticiasBorrador: noticias.filter((n) => n.estado === "borrador").length,
+    noticias: noticias.data().count,
+    noticiasBorrador: noticiasBorrador.data().count,
     encuestas: encuestas.length,
     encuestasAbiertas: encuestas.filter((e) => e.estado === "abierta").length,
     votos: encuestas.reduce(
-      (n, e) => n + e.opciones.reduce((m, o) => m + o.votos, 0),
+      (n, e) => n + (e.opciones ?? []).reduce((m, o) => m + (o.votos ?? 0), 0),
       0,
     ),
-    invitaciones: invitaciones.length,
-    invitacionesActivas: invitaciones.filter((i) => i.estado === "activa").length,
-    eventos: eventos.length,
-    eventosProximos: eventos.filter(
-      (e) => fromISODate(fechaEvento, e.hora).getTime() >= now,
-    ).length,
-    diaEvento: isoShort(fechaEvento),
+    invitaciones: invitaciones.data().count,
+    invitacionesActivas: invitacionesActivas.data().count,
+    eventos: eventos.size,
+    eventosProximos,
+    diaEvento: isoShort(fecha),
   };
 }
 

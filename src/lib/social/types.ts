@@ -173,6 +173,7 @@ export interface Conversation {
  *  - `message`    — te llegó un mensaje privado
  *  - `cronograma` — cambió el cronograma del evento (sin actor: lo edita el panel)
  *  - `noticia`    — se publicó una noticia (sin actor)
+ *  - `encuesta`   — se abrió una votación nueva (sin actor)
  */
 export type NotificationKind =
   | "like"
@@ -181,21 +182,10 @@ export type NotificationKind =
   | "post"
   | "message"
   | "cronograma"
-  | "noticia";
+  | "noticia"
+  | "encuesta";
 
-export interface NotificationRow {
-  id: string;
-  /** dueño de la notificación */
-  userId: UserId;
-  kind: NotificationKind;
-  /** quién la generó; ausente en los avisos de plataforma (`cronograma`,
-   *  `noticia`), que no los produce una persona sino el panel */
-  actorId?: UserId;
-  text: string;
-  /** bajada propia de esta notificación; si falta, `getNotifications` pone una
-   *  genérica según el `kind` */
-  description?: string;
-  href?: string;
-  at: number;
-  read?: boolean;
-}
+/*  La notificación guardada vive en Firestore (`trapnexport-notification`); su
+ *  forma es `NotificacionDoc` en `lib/firebase/schema.ts`. Acá queda sólo el
+ *  `NotificationKind`, que lo comparten el escritor (`social/notify.ts`) y el
+ *  mapper de lectura (`social/queries.ts`). */

@@ -1,16 +1,22 @@
-import { db, newId } from "@/lib/social/store";
+import { FieldValue } from "firebase-admin/firestore";
+
+import { adminDb } from "@/lib/firebase/admin";
+import { COL } from "@/lib/firebase/collections";
 import type { NotificationKind, UserId } from "@/lib/social/types";
 
 /** Alta de notificaciones de campanita — servicio de dominio, no Server Action.
  *
- *  Lo llaman las Server Actions de `social/` (post nuevo, mensaje privado) y las
- *  de `contenido/` (cronograma, noticias) desde el servidor; ninguna pantalla lo
- *  toca. Es la única costura por la que `contenido/` escribe en el store social:
- *  la notificación es dato de la red —tiene dueño y estado de leída por
- *  persona—, no del contenido que administra el club.
+ *  Lo llaman las Server Actions de `social/` (post nuevo, like, comentario,
+ *  mensaje privado) y las de `contenido/` (cronograma, noticia publicada,
+ *  votación abierta) desde el servidor; ninguna pantalla lo toca.
  *
- *  Cuando entre Firestore, esto pasa a escribir en la colección `notifications`
- *  (un documento por destinatario) y las firmas no cambian.
+ *  Escribe en `trapnexport-notification`, **un documento por destinatario**:
+ *  cada quien marca el suyo como leído por su lado. Va con el Admin SDK, que se
+ *  saltea `firestore.rules` — la colección está cerrada al cliente y la lectura
+ *  también pasa por el servidor (`social/queries.ts`).
+ *
+ *  Las dos funciones son `async` y hay que **esperarlas**: una Server Action
+ *  puede terminar y cortar el trabajo pendiente antes de que la escritura salga.
  */
 
 interface NuevaNotificacion {
@@ -24,22 +30,52 @@ interface NuevaNotificacion {
   actorId?: UserId;
 }
 
-/** Notifica a una sola cuenta (mensaje privado, en el futuro respuestas, etc.). */
-export function notifyUser(userId: UserId, n: NuevaNotificacion): void {
+/** El documento a guardar, sin los campos opcionales vacíos: Firestore rechaza
+ *  `undefined`. */
+const doc = (userId: string, n: NuevaNotificacion) => {
+  const base: Record<string, unknown> = {
+    userId,
+    kind: n.kind,
+    text: n.text,
+    read: false,
+    createdAt: FieldValue.serverTimestamp(),
+  };
+  if (n.actorId) base.actorId = n.actorId;
+  if (n.description) base.description = n.description;
+  if (n.href) base.href = n.href;
+  return base;
+};
+
+/** Notifica a una sola cuenta (like, comentario, mensaje privado). */
+export async function notifyUser(userId: UserId, n: NuevaNotificacion): Promise<void> {
   if (userId === n.actorId) return;
-  db.notifications.unshift({ id: newId("n"), userId, at: Date.now(), ...n });
+  await adminDb().collection(COL.notificacion).add(doc(userId, n));
 }
 
-/** Fan-out: una notificación por cuenta activa, salvo el actor.
+/** Fan-out: una notificación por cuenta **no suspendida**, salvo el actor.
  *
- *  Se guarda una fila por destinatario y no un único doc "broadcast" a
- *  propósito: cada quien marca la suya como leída por su lado. Un doc compartido
- *  se apagaría para todos apenas el primero lo abriera. Con veinte cuentas
- *  semilla el costo es nulo, y es el mismo patrón que en Firestore.
+ *  Los destinatarios son las cuentas reales de `trapnexport-user`, no una lista
+ *  semilla: si nadie se registró todavía, un aviso del panel no le llega a
+ *  nadie, que es lo correcto.
+ *
+ *  Un batch de Firestore admite 500 escrituras; se parte en tandas de 450 por
+ *  las dudas de que el plantel crezca.
  */
-export function notifyAll(n: NuevaNotificacion): void {
-  for (const u of db.users) {
-    if (u.suspended || u.id === n.actorId) continue;
-    db.notifications.unshift({ id: newId("n"), userId: u.id, at: Date.now(), ...n });
+export async function notifyAll(n: NuevaNotificacion): Promise<void> {
+  const db = adminDb();
+  const destinatarios = await db
+    .collection(COL.user)
+    .where("status", "in", ["active", "pending"])
+    .get();
+
+  const ids = destinatarios.docs.map((d) => d.id).filter((id) => id !== n.actorId);
+  if (!ids.length) return;
+
+  for (let i = 0; i < ids.length; i += 450) {
+    const batch = db.batch();
+    for (const id of ids.slice(i, i + 450)) {
+      batch.set(db.collection(COL.notificacion).doc(), doc(id, n));
+    }
+    await batch.commit();
   }
 }

@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { adminDb } from "@/lib/firebase/admin";
+import { COL } from "@/lib/firebase/collections";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
 import { db, newId } from "@/lib/social/store";
 import type {
@@ -85,7 +87,7 @@ export async function publishPost(
   // Aviso de campanita al resto de la comunidad: alguien publicó en el feed.
   // `notifyAll` ya excluye al autor.
   const autor = db.users.find((u) => u.id === me());
-  notifyAll({
+  await notifyAll({
     kind: "post",
     actorId: me(),
     text: `${autor?.name ?? "Alguien"} publicó en el feed`,
@@ -109,7 +111,7 @@ export async function toggleLike(postId: string, liked: boolean): Promise<void> 
   // Un aviso al autor por cada like NUEVO —quitar y volver a poner el like
   // vuelve a avisar, sacarlo no—. `notifyUser` ya descarta el like a uno mismo.
   if (liked && !yaEstaba) {
-    notifyUser(post.authorId, {
+    await notifyUser(post.authorId, {
       kind: "like",
       actorId: me(),
       text: `A ${nombreDe(me())} le gustó tu publicación`,
@@ -282,7 +284,7 @@ export async function addComment(
   // `notifyUser` descarta comentar el propio post.
   const post = db.posts.find((p) => p.id === postId);
   if (post) {
-    notifyUser(post.authorId, {
+    await notifyUser(post.authorId, {
       kind: "comment",
       actorId: me(),
       text: `${nombreDe(me())} comentó tu publicación`,
@@ -330,7 +332,7 @@ export async function sendMessage(conversationId: string, text: string): Promise
   const peerId = conv.participantIds.find((p) => p !== me());
   const yo = db.users.find((u) => u.id === me());
   if (peerId) {
-    notifyUser(peerId, {
+    await notifyUser(peerId, {
       kind: "message",
       actorId: me(),
       text: `${yo?.name ?? "Alguien"} te envió un mensaje`,
@@ -346,19 +348,41 @@ export async function sendMessage(conversationId: string, text: string): Promise
 
 /* ── notificaciones ──────────────────────────────────────────────────────── */
 
+/*  Las tres operan sobre `trapnexport-notification` con el Admin SDK. El
+ *  `.catch()` traga el caso de una fila que otra pestaña ya borró: marcar como
+ *  leída algo que no está no es un error que el usuario tenga que ver. */
+
 export async function markNotificationRead(id: string): Promise<void> {
-  const n = db.notifications.find((x) => x.id === id);
-  if (n) n.read = true;
+  await adminDb()
+    .collection(COL.notificacion)
+    .doc(id)
+    .update({ read: true })
+    .catch(() => {});
   revalidatePath("/notificaciones");
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
-  db.notifications.filter((n) => n.userId === me()).forEach((n) => (n.read = true));
+  const db2 = adminDb();
+  const snap = await db2
+    .collection(COL.notificacion)
+    .where("userId", "==", me())
+    .where("read", "==", false)
+    .get();
+
+  if (snap.size) {
+    const batch = db2.batch();
+    snap.docs.forEach((d) => batch.update(d.ref, { read: true }));
+    await batch.commit();
+  }
   revalidatePath("/notificaciones");
 }
 
 export async function dismissNotification(id: string): Promise<void> {
-  db.notifications = db.notifications.filter((n) => n.id !== id);
+  await adminDb()
+    .collection(COL.notificacion)
+    .doc(id)
+    .delete()
+    .catch(() => {});
   revalidatePath("/notificaciones");
 }
 

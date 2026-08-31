@@ -30,8 +30,9 @@ export interface Noticia {
   /** la bajada: el párrafo que se lee debajo del título */
   copete: string;
   cuerpo: string;
-  /** portada generada (data-URI); se regenera del título al guardar */
-  cover: string;
+  /** URL de la portada. Vacío hasta que haya un uploader de imágenes en el
+   *  panel: hoy ninguna noticia trae una. */
+  cover?: string;
   estado: EstadoNoticia;
   autor: string;
   createdAt: number;

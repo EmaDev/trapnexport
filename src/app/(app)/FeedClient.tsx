@@ -20,7 +20,11 @@ import { SharePostSheet } from "@/components/organisms/SharePostSheet";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { mediaUrl } from "@/lib/media";
 import { registerShare } from "@/lib/social/actions";
-import type { Cronograma } from "@/lib/contenido/queries";
+import type {
+  Cronograma,
+  EncuestaFeedVM,
+  NoticiaFeedVM,
+} from "@/lib/contenido/queries";
 import type { PostVM } from "@/lib/social/queries";
 import { APP_NAME, LAUNCH_DATE } from "@/lib/site";
 import { useNotifications } from "./notifications-context";
@@ -69,9 +73,13 @@ const SLIDES: CarouselImage[] = [
 export function FeedClient({
   posts,
   cronograma,
+  encuestas,
+  noticias,
 }: {
   posts: PostVM[];
   cronograma: Cronograma;
+  encuestas: EncuestaFeedVM[];
+  noticias: NoticiaFeedVM[];
 }) {
   const router = useRouter();
   const { unread, open, session, unreadChats } = useNotifications();
@@ -180,7 +188,7 @@ export function FeedClient({
             adentro —`TabsGlow` es siempre controlado—, así que lo único que
             baja es el cronograma: son datos del servidor, los mismos que edita
             el panel. */}
-        <FeedTabs cronograma={cronograma} />
+        <FeedTabs cronograma={cronograma} encuestas={encuestas} noticias={noticias} />
 
         {posts.map((post) => (
           <PostCard

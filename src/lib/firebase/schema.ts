@@ -1,4 +1,4 @@
-import type { ClaimStatus, PlayerFicha } from "@/lib/social/types";
+import type { ClaimStatus, NotificationKind, PlayerFicha } from "@/lib/social/types";
 
 /** La forma **exacta** de lo que hay guardado en Firestore.
  *
@@ -220,6 +220,135 @@ export interface GalleryDoc {
  */
 export interface HandleDoc {
   uid: string;
+  createdAt: FsTimestamp;
+}
+
+/* ── contenido del panel ─────────────────────────────────────────────────── */
+
+/** El contenido que administra `/admin` (noticias, encuestas, invitaciones,
+ *  cronograma). Reflejan los tipos de dominio de `lib/contenido/types.ts` —que
+ *  ya están en español— con dos diferencias:
+ *
+ *  - `createdAt` / `updatedAt` son `FsTimestamp` acá y `number` (millis) en el
+ *    dominio: se escriben con `serverTimestamp()` y el mapper de `queries.ts`
+ *    los baja a milisegundos, igual que en `admin/cuentas.ts`.
+ *  - las fechas de calendario (`fecha`, `hora`, `cierra`) siguen siendo
+ *    strings `"YYYY-MM-DD"` / `"HH:mm"`. Un evento ocurre a las 21:00 **en la
+ *    cancha**, no en un instante UTC; ver el encabezado de `contenido/types.ts`.
+ *
+ *  El id del documento es el id de dominio. Para las encuestas semilla ese id
+ *  es el del premio (`"mejor-arquero"`), lo que hace que `/admin/presentacion`
+ *  cruce encuesta ↔ premio con un `get` directo y sin tabla de equivalencias.
+ */
+
+/** `trapnexport-noticia/{id}`. Refleja `Noticia`. */
+export interface NoticiaDoc {
+  titulo: string;
+  copete: string;
+  cuerpo: string;
+  /** URL de la portada. Ausente mientras no haya un uploader en el panel. */
+  cover?: string;
+  estado: "borrador" | "publicada";
+  autor: string;
+  /** una sola destacada por vez: marcar una apaga la anterior */
+  destacada: boolean;
+  createdAt: FsTimestamp;
+  updatedAt: FsTimestamp;
+}
+
+/** Una opción dentro de `EncuestaDoc.opciones`. Array embebido y no
+ *  subcolección: son pocas por encuesta, se leen y se reescriben siempre
+ *  juntas, y el tope de 1 MB del documento sobra. */
+export interface OpcionEncuestaDoc {
+  id: string;
+  texto: string;
+  votos: number;
+  /** URL de imagen o video: la opción se vota como media, no como texto */
+  media?: string;
+}
+
+/** `trapnexport-encuesta/{id}`. Refleja `Encuesta`. */
+export interface EncuestaDoc {
+  pregunta: string;
+  descripcion?: string;
+  opciones: OpcionEncuestaDoc[];
+  multiple: boolean;
+  resultadosVisibles: boolean;
+  estado: "borrador" | "abierta" | "cerrada";
+  /** "YYYY-MM-DD"; ausente = sin fecha de cierre */
+  cierra?: string;
+  createdAt: FsTimestamp;
+}
+
+/** `trapnexport-invitacion/{id}`. Refleja `Invitacion`.
+ *
+ *  `code` es lo que va en la URL pública `/invitacion/:code`; se consulta por
+ *  `where("code", "==", …)` (índice de campo único, automático) y es inmutable
+ *  una vez emitido. */
+export interface InvitacionDoc {
+  code: string;
+  invitado: string;
+  titulo: string;
+  mensaje: string;
+  fecha: string;
+  hora: string;
+  lugar: string;
+  plantilla: "gala" | "cancha" | "minima";
+  efecto: "holo" | "aurora" | "flote";
+  revelacion: "directa" | "lacre" | "cortina" | "raspar";
+  estado: "activa" | "revocada";
+  createdAt: FsTimestamp;
+}
+
+/** `trapnexport-evento/{id}`. Refleja `Evento`. Sin `fecha`: la comparten todos
+ *  y vive en `CronogramaConfigDoc`. */
+export interface EventoDoc {
+  nombre: string;
+  descripcion: string;
+  /** "HH:mm" — hora de inicio dentro del día del cronograma */
+  hora: string;
+  /** minutos; puede cruzar la medianoche sin cambiar de día */
+  duracion: number;
+  lugar: string;
+  tipo: "partido" | "entrenamiento" | "institucional" | "social";
+  createdAt: FsTimestamp;
+}
+
+/** `trapnexport-config/cronograma`. El día en que ocurre **todo** el cronograma.
+ *
+ *  Un solo campo para toda la colección de eventos: moverlo es una escritura
+ *  atómica y no un update de N filas donde la mitad podría quedarse atrás. */
+export interface CronogramaConfigDoc {
+  /** "YYYY-MM-DD" */
+  fecha: string;
+  updatedAt: FsTimestamp;
+}
+
+/* ── trapnexport-notification/{id} ──────────────────────────────────────────── */
+
+/** Un aviso de campanita. **Un documento por destinatario**, no un doc
+ *  "broadcast" compartido: cada quien marca el suyo como leído por su lado, y
+ *  un doc único se apagaría para todos apenas el primero lo abriera.
+ *
+ *  Lo escribe el servidor (`lib/social/notify.ts`): las Server Actions de
+ *  `social/` (like, comentario, mensaje, post nuevo) y las de `contenido/`
+ *  (cronograma, noticia publicada, votación abierta). La lista y el contador
+ *  salen de `social/queries.ts`.
+ */
+export interface NotificacionDoc {
+  /** a quién le pertenece. Hoy es el id de la cuenta semilla del feed; con
+   *  Firebase Auth en el módulo público pasa a ser el uid, sin cambiar la forma. */
+  userId: string;
+  kind: NotificationKind;
+  /** quién generó el hecho. Ausente en los avisos de plataforma (`cronograma`,
+   *  `noticia`, `encuesta`), que no los produce una persona sino el panel. */
+  actorId?: string;
+  /** el título que se ve en la lista */
+  text: string;
+  /** la bajada; si falta, `getNotifications` pone una genérica según el `kind` */
+  description?: string;
+  href?: string;
+  read: boolean;
   createdAt: FsTimestamp;
 }
 

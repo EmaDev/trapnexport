@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 
-import { getCronograma } from "@/lib/contenido/queries";
+import {
+  getCronograma,
+  getEncuestasFeed,
+  getNoticiasFeed,
+} from "@/lib/contenido/queries";
 import { getFeed } from "@/lib/social/queries";
 import { FeedClient } from "./FeedClient";
 
@@ -12,6 +16,18 @@ export const metadata: Metadata = {
 };
 
 export default async function FeedPage() {
-  const [posts, cronograma] = await Promise.all([getFeed(), getCronograma()]);
-  return <FeedClient posts={posts} cronograma={cronograma} />;
+  const [posts, cronograma, encuestas, noticias] = await Promise.all([
+    getFeed(),
+    getCronograma(),
+    getEncuestasFeed(),
+    getNoticiasFeed(),
+  ]);
+  return (
+    <FeedClient
+      posts={posts}
+      cronograma={cronograma}
+      encuestas={encuestas}
+      noticias={noticias}
+    />
+  );
 }

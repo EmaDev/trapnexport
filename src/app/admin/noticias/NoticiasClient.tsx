@@ -112,12 +112,14 @@ export function NoticiasClient({ noticias }: { noticias: NoticiaRow[] }) {
       width: "3fr",
       render: (row) => (
         <div className="flex min-w-0 items-start gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element -- data-URI */}
-          <img
-            src={row.cover}
-            alt=""
-            className="hidden size-12 shrink-0 rounded-lg object-cover sm:block"
-          />
+          {row.cover && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={row.cover}
+              alt=""
+              className="hidden size-12 shrink-0 rounded-lg object-cover sm:block"
+            />
+          )}
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 font-medium">
               <span className="truncate">{row.titulo}</span>
