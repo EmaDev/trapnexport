@@ -30,6 +30,7 @@ export function NotificacionesClient({ items: initial }: { items: NotificationVM
       read: n.read,
       avatar: n.avatar,
       href: n.href,
+      tone: n.tone,
     })),
   );
 

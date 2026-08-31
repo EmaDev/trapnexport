@@ -1,10 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { Button, Card, Textarea, useSnackbar } from "lib-kit-components";
 
 import { CloseIcon, ImageIcon, SendIcon } from "@/components/atoms/icons";
-import { readImage } from "@/lib/media-upload";
+import { deletePostImage, uploadPostImage } from "@/lib/storage/post-image";
 import { publishPost } from "@/lib/social/actions";
 import type { SessionVM } from "@/lib/social/queries";
 
@@ -19,11 +20,13 @@ const MAX_FOTOS = 4;
  *  `SocialPost` de `lib-kit-components`, cuyo `PostMedia` es `{ src, alt }` y
  *  se renderiza con un `<img>` — un video ahí no se ve. Los videos van al
  *  carrete del perfil (`PersonalMediaUploader`), que dibujamos nosotros y sí
- *  monta un `<video>`. El día que la librería acepte video en `media`, esto es
- *  cambiar el `accept` del input y el `readImage` por `readMedia`.
+ *  monta un `<video>`.
  *
- *  Las fotos se reescalan en el navegador antes de salir (`readImage`): sin eso
- *  una foto de celular sola ya se pasa del `bodySizeLimit` de la Server Action.
+ *  Las fotos se comprimen fuerte en el navegador y se suben a Firebase Storage
+ *  al elegirlas (`uploadPostImage`), no al publicar: la Server Action `publishPost`
+ *  recibe la `downloadURL`, no el archivo. Quitar una foto ya subida la borra
+ *  del bucket; abandonar el compositor sin publicar deja el archivo huérfano —es
+ *  el precio de subir mientras se escribe y no al final.
  *
  *  Se usa embebido (el perfil, donde vive en la columna) y dentro de una hoja
  *  (el foro, donde lo abre el FAB). `onPublished` es lo único que separa los
@@ -38,9 +41,10 @@ export function PostComposer({
   onPublished?: () => void;
 }) {
   const { snack } = useSnackbar();
+  const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState("");
-  const [fotos, setFotos] = useState<{ src: string; alt: string }[]>([]);
+  const [fotos, setFotos] = useState<{ src: string; alt: string; path: string }[]>([]);
   const [leyendo, setLeyendo] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -58,12 +62,22 @@ export function PostComposer({
     setLeyendo(true);
     try {
       const elegidas = Array.from(files).slice(0, libres);
-      const leidas = await Promise.all(elegidas.map((f) => readImage(f)));
-
-      const ok = leidas.flatMap((r, i) =>
-        r.ok ? [{ src: r.src, alt: elegidas[i].name.replace(/\.[^.]+$/, "") }] : [],
+      const subidas = await Promise.all(
+        elegidas.map(async (f) => {
+          try {
+            const { src, path } = await uploadPostImage(f);
+            return { ok: true as const, src, path, alt: f.name.replace(/\.[^.]+$/, "") };
+          } catch (e) {
+            return {
+              ok: false as const,
+              error: e instanceof Error ? e.message : "No se pudo subir la imagen.",
+            };
+          }
+        }),
       );
-      const fallo = leidas.find((r) => !r.ok);
+
+      const ok = subidas.flatMap((r) => (r.ok ? [{ src: r.src, alt: r.alt, path: r.path }] : []));
+      const fallo = subidas.find((r) => !r.ok);
       if (fallo && !fallo.ok) snack({ message: fallo.error, variant: "error" });
 
       if (ok.length) setFotos((prev) => [...prev, ...ok].slice(0, MAX_FOTOS));
@@ -93,6 +107,10 @@ export function PostComposer({
 
     startTransition(async () => {
       await publishPost(payload.text, payload.media);
+      // `refresh` re-corre el layout del módulo público: sin esto el post sale
+      // pero el badge de la campana (que vive en `AppShell`, del lado servidor)
+      // no se entera hasta recargar.
+      router.refresh();
       snack({ message: "Publicado" });
     });
   };
@@ -123,7 +141,12 @@ export function PostComposer({
               <button
                 type="button"
                 aria-label={`Quitar ${f.alt}`}
-                onClick={() => setFotos((prev) => prev.filter((_, j) => j !== i))}
+                onClick={() => {
+                  setFotos((prev) => prev.filter((_, j) => j !== i));
+                  // El archivo ya está en el bucket: sacarlo de la lista también
+                  // lo borra de ahí. Best-effort, no bloquea la UI.
+                  void deletePostImage(f.path);
+                }}
                 className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-black/65 text-white"
               >
                 <CloseIcon className="size-3.5" width="1em" height="1em" />
@@ -152,7 +175,9 @@ export function PostComposer({
           className="ml-auto"
           size="sm"
           loading={pending}
-          disabled={vacio}
+          // También bloqueado mientras sube una foto: si no, Publicar saldría
+          // sin la imagen que todavía está en camino al bucket.
+          disabled={vacio || leyendo}
           rightIcon={<SendIcon className="size-4" width="1em" height="1em" />}
           onClick={publicar}
         >

@@ -21,7 +21,8 @@ import {
   type RevelacionInvitacion,
 } from "@/lib/contenido/types";
 import { mediaUrl } from "@/lib/media";
-import { fromISODate } from "@/lib/time";
+import { notifyAll } from "@/lib/social/notify";
+import { fromISODate, isoShort } from "@/lib/time";
 
 /** Escrituras del contenido del club, como Server Actions.
  *
@@ -71,6 +72,15 @@ const revalidate = (path: string) => {
   revalidatePath("/admin");
 };
 
+/** Aviso de campanita a toda la comunidad por un cambio del panel (cronograma o
+ *  noticia). Además de crear las notificaciones revalida las superficies donde
+ *  se ven: la lista dedicada y el feed, que es donde viven las dos solapas. */
+const avisar = (text: string, kind: "cronograma" | "noticia", description?: string) => {
+  notifyAll({ kind, text, description, href: "/" });
+  revalidatePath("/notificaciones");
+  revalidatePath("/");
+};
+
 /* ── noticias ────────────────────────────────────────────────────────────── */
 
 export async function saveNoticia(input: NoticiaInput): Promise<string | null> {
@@ -98,8 +108,13 @@ export async function saveNoticia(input: NoticiaInput): Promise<string | null> {
   }
 
   if (existing) {
+    // Una noticia "nace" para la comunidad cuando pasa a publicada, sea al
+    // crearla así o al publicarla desde el borrador. Editar una ya publicada no
+    // vuelve a avisar.
+    const sePublica = existing.estado !== "publicada" && data.estado === "publicada";
     Object.assign(existing, data, { updatedAt: Date.now() });
     revalidate("/admin/noticias");
+    if (sePublica) avisar(`Nueva noticia: ${titulo}`, "noticia", data.copete || undefined);
     return existing.id;
   }
 
@@ -112,6 +127,9 @@ export async function saveNoticia(input: NoticiaInput): Promise<string | null> {
   });
 
   revalidate("/admin/noticias");
+  if (data.estado === "publicada") {
+    avisar(`Nueva noticia: ${titulo}`, "noticia", data.copete || undefined);
+  }
   return id;
 }
 
@@ -119,9 +137,11 @@ export async function setNoticiaEstado(id: string, estado: EstadoNoticia): Promi
   const n = contenidoDb.noticias.find((x) => x.id === id);
   if (!n) return;
 
+  const sePublica = n.estado !== "publicada" && estado === "publicada";
   n.estado = estado;
   n.updatedAt = Date.now();
   revalidate("/admin/noticias");
+  if (sePublica) avisar(`Nueva noticia: ${n.titulo}`, "noticia", n.copete || undefined);
 }
 
 export async function deleteNoticia(id: string): Promise<void> {
@@ -419,6 +439,7 @@ export async function saveEvento(input: EventoInput): Promise<string | null> {
   if (existing) {
     Object.assign(existing, data);
     revalidate("/admin/cronograma");
+    avisar(`Cambió un evento del cronograma: ${nombre}`, "cronograma", data.descripcion || undefined);
     return existing.id;
   }
 
@@ -426,13 +447,17 @@ export async function saveEvento(input: EventoInput): Promise<string | null> {
   contenidoDb.eventos.push({ ...data, id, createdAt: Date.now() });
 
   revalidate("/admin/cronograma");
+  avisar(`Nuevo evento en el cronograma: ${nombre}`, "cronograma", `${data.hora} · ${data.lugar || "a confirmar"}`);
   return id;
 }
 
 export async function deleteEvento(id: string): Promise<void> {
   const i = contenidoDb.eventos.findIndex((e) => e.id === id);
-  if (i !== -1) contenidoDb.eventos.splice(i, 1);
+  if (i === -1) return;
+
+  const [borrado] = contenidoDb.eventos.splice(i, 1);
   revalidate("/admin/cronograma");
+  avisar(`Se quitó del cronograma: ${borrado.nombre}`, "cronograma");
 }
 
 /** Mueve el cronograma entero a otro día. Devuelve la fecha guardada, o `null`
@@ -447,7 +472,11 @@ export async function setFechaEvento(fecha: string): Promise<string | null> {
   const iso = isoDate(fecha);
   if (!iso) return null;
 
+  const anterior = contenidoDb.fechaEvento;
   contenidoDb.fechaEvento = iso;
   revalidate("/admin/cronograma");
+  if (iso !== anterior) {
+    avisar(`El cronograma se movió al ${isoShort(iso)}`, "cronograma");
+  }
   return iso;
 }

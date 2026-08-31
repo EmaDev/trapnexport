@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { notifyAll, notifyUser } from "@/lib/social/notify";
 import { db, newId } from "@/lib/social/store";
 import type {
   GalleryItem,
@@ -24,10 +25,21 @@ import type {
 
 const me = () => db.currentUserId;
 
+/** Nombre para el texto de una notificación; "Alguien" si la cuenta ya no está. */
+const nombreDe = (id: string) => db.users.find((u) => u.id === id)?.name ?? "Alguien";
+
 const toggleIn = (list: string[], id: string, on: boolean) => {
   const i = list.indexOf(id);
   if (on && i === -1) list.push(id);
   if (!on && i !== -1) list.splice(i, 1);
+};
+
+/** Primer renglón de un texto para la bajada de una notificación: una línea,
+ *  sin cortar a mitad de palabra y con puntos suspensivos si sobra. */
+const recorte = (s: string, max = 90) => {
+  const linea = s.trim().split("\n")[0];
+  if (linea.length <= max) return linea;
+  return linea.slice(0, linea.lastIndexOf(" ", max) > 0 ? linea.lastIndexOf(" ", max) : max) + "…";
 };
 
 const revalidatePublic = (postId?: string) => {
@@ -41,8 +53,10 @@ const revalidatePublic = (postId?: string) => {
 
 /* ── publicaciones ───────────────────────────────────────────────────────── */
 
-/** Publica en el feed. `media` son imagenes ya reescaladas por
- *  `lib/media-upload.ts` — el compositor no manda el archivo original.
+/** Publica en el feed. `media` son las imagenes YA comprimidas y subidas a
+ *  Firebase Storage por el compositor (`lib/storage/post-image.ts`): cada item
+ *  trae la `downloadURL` en `src` y su ruta en el bucket en `path`. Por aci no
+ *  viaja ningun archivo.
  *
  *  Un post puede ser solo texto o solo imagenes: lo unico que se rechaza es
  *  que no venga ninguna de las dos. */
@@ -56,8 +70,9 @@ export async function publishPost(
   const fotos = media.filter((m) => m.src).slice(0, 4);
   if (!clean && fotos.length === 0) return;
 
+  const id = newId("p");
   db.posts.unshift({
-    id: newId("p"),
+    id,
     authorId: me(),
     text: clean,
     media: fotos,
@@ -67,7 +82,19 @@ export async function publishPost(
     shares: 0,
   });
 
+  // Aviso de campanita al resto de la comunidad: alguien publicó en el feed.
+  // `notifyAll` ya excluye al autor.
+  const autor = db.users.find((u) => u.id === me());
+  notifyAll({
+    kind: "post",
+    actorId: me(),
+    text: `${autor?.name ?? "Alguien"} publicó en el feed`,
+    description: clean ? recorte(clean) : "Compartió fotos",
+    href: `/post/${id}`,
+  });
+
   revalidatePublic();
+  revalidatePath("/notificaciones");
   revalidatePath("/admin");
   revalidatePath("/admin/publicaciones");
 }
@@ -76,7 +103,22 @@ export async function toggleLike(postId: string, liked: boolean): Promise<void> 
   const post = db.posts.find((p) => p.id === postId);
   if (!post) return;
 
+  const yaEstaba = post.likedBy.includes(me());
   toggleIn(post.likedBy, me(), liked);
+
+  // Un aviso al autor por cada like NUEVO —quitar y volver a poner el like
+  // vuelve a avisar, sacarlo no—. `notifyUser` ya descarta el like a uno mismo.
+  if (liked && !yaEstaba) {
+    notifyUser(post.authorId, {
+      kind: "like",
+      actorId: me(),
+      text: `A ${nombreDe(me())} le gustó tu publicación`,
+      description: recorte(post.text) || "Tu publicación",
+      href: `/post/${postId}`,
+    });
+    revalidatePath("/notificaciones");
+  }
+
   revalidatePublic(postId);
 }
 
@@ -236,6 +278,20 @@ export async function addComment(
     parentId: parentId ?? null,
   });
 
+  // Aviso al autor del post por cada comentario (una respuesta también lo es).
+  // `notifyUser` descarta comentar el propio post.
+  const post = db.posts.find((p) => p.id === postId);
+  if (post) {
+    notifyUser(post.authorId, {
+      kind: "comment",
+      actorId: me(),
+      text: `${nombreDe(me())} comentó tu publicación`,
+      description: recorte(clean),
+      href: `/post/${postId}`,
+    });
+    revalidatePath("/notificaciones");
+  }
+
   revalidatePublic(postId);
   revalidatePath("/admin");
 }
@@ -269,8 +325,23 @@ export async function sendMessage(conversationId: string, text: string): Promise
 
   conv.messages.push({ id: newId("m"), fromId: me(), text: clean, at: Date.now() });
 
+  // Campanita para el destinatario. Las conversaciones son siempre de a dos
+  // (ver `Conversation`), así que el otro participante es el que no soy yo.
+  const peerId = conv.participantIds.find((p) => p !== me());
+  const yo = db.users.find((u) => u.id === me());
+  if (peerId) {
+    notifyUser(peerId, {
+      kind: "message",
+      actorId: me(),
+      text: `${yo?.name ?? "Alguien"} te envió un mensaje`,
+      description: recorte(clean),
+      href: `/chat/${conversationId}`,
+    });
+  }
+
   revalidatePath("/chat");
   revalidatePath(`/chat/${conversationId}`);
+  revalidatePath("/notificaciones");
 }
 
 /* ── notificaciones ──────────────────────────────────────────────────────── */

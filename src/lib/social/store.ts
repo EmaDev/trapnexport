@@ -1,4 +1,4 @@
-import { avatarUrl, mediaUrl } from "@/lib/media";
+import { avatarUrl } from "@/lib/media";
 import { JUGADORES } from "@/lib/trap-awards";
 import type {
   CommentRow,
@@ -93,7 +93,7 @@ function seed(): Db {
   }));
 
   // La única cuenta que no es del plantel: existe para que el panel de
-  // moderación tenga algo real que moderar (una suspendida y un post oculto).
+  // moderación tenga algo real que moderar (una cuenta suspendida).
   users.push({
     id: "promo",
     name: "Cuenta Promo",
@@ -104,126 +104,12 @@ function seed(): Db {
     joinedAt: now - 3 * DAY,
   });
 
-  const posts: Post[] = [
-    {
-      id: "p1",
-      authorId: "leandro-atondo",
-      text:
-        "Ya está la lista de la segunda edición: diecisiete premios. Catorce se " +
-        "votan entre nosotros, tres salen de los videos y el once ideal es el " +
-        "único donde se eligen varios. El que no vota no se queja del resultado.",
-      media: [
-        {
-          src: mediaUrl("Trap Awards II", "p1a"),
-          alt: "Las diecisiete categorías de la segunda edición",
-        },
-      ],
-      createdAt: now - 2 * HOUR,
-      likedBy: [YO, "martin-motta", "yago-taboada"],
-      savedBy: [YO],
-      shares: 4,
-    },
-    {
-      id: "p2",
-      authorId: "federico-rodriguez",
-      text:
-        "Los premios de gol, caño y asistencia no se abren hasta que estén los " +
-        "videos. Si tenés algo grabado de la temporada, mandámelo antes del " +
-        "viernes: lo que no llegue no entra en la votación.",
-      media: [],
-      createdAt: now - 5 * HOUR,
-      likedBy: [YO, "leandro-atondo"],
-      savedBy: [],
-      shares: 1,
-    },
-    {
-      id: "p3",
-      authorId: "josue-ferreiro",
-      text: "Tres fotos de la última fecha. La del medio es la única donde estoy corriendo.",
-      media: [
-        { src: mediaUrl("Última fecha 01", "p3a"), alt: "Foto de la última fecha, número 1" },
-        { src: mediaUrl("Última fecha 02", "p3b"), alt: "Foto de la última fecha, número 2" },
-        { src: mediaUrl("Última fecha 03", "p3c"), alt: "Foto de la última fecha, número 3" },
-      ],
-      createdAt: now - 26 * HOUR,
-      likedBy: [YO, "leandro-atondo", "martin-motta", "agustin-carranza"],
-      savedBy: ["leandro-atondo"],
-      shares: 9,
-    },
-    {
-      id: "p4",
-      authorId: YO,
-      text:
-        "Arranqué el panel de la app de los premios. La regla que me puse: el " +
-        "panel no tiene datos propios, lee exactamente lo mismo que ven ustedes " +
-        "en la votación.",
-      media: [],
-      createdAt: now - 2 * DAY,
-      likedBy: ["leandro-atondo", "naza-sochan"],
-      savedBy: [],
-      shares: 0,
-    },
-    {
-      id: "p5",
-      authorId: "promo",
-      text: "OFERTA IMPERDIBLE 2x1, escribime por privado ahora",
-      media: [],
-      createdAt: now - 30 * HOUR,
-      likedBy: [],
-      savedBy: [],
-      shares: 0,
-      hidden: true,
-    },
-  ];
-
-  const comments: CommentRow[] = [
-    {
-      id: "c1",
-      postId: "p1",
-      authorId: "mariano-cisterna",
-      text: "El once ideal se vota por nombre o por puesto?",
-      createdAt: now - 100 * MIN,
-      likedBy: ["leandro-atondo"],
-      parentId: null,
-    },
-    {
-      id: "c2",
-      postId: "p1",
-      authorId: "leandro-atondo",
-      text: "Por nombre: elegís once y el equipo se arma con los más votados.",
-      createdAt: now - 80 * MIN,
-      likedBy: ["mariano-cisterna", YO],
-      parentId: "c1",
-    },
-    {
-      id: "c3",
-      postId: "p1",
-      authorId: "yago-taboada",
-      text: "Falta el premio al peor asado del año y lo sabemos todos.",
-      createdAt: now - 40 * MIN,
-      likedBy: [],
-      parentId: null,
-    },
-    {
-      id: "c4",
-      postId: "p3",
-      authorId: "naza-sochan",
-      text: "La segunda es la mejor foto del año, sin discusión.",
-      createdAt: now - 20 * HOUR,
-      likedBy: ["josue-ferreiro"],
-      parentId: null,
-      pinned: true,
-    },
-    {
-      id: "c5",
-      postId: "p2",
-      authorId: "martin-motta",
-      text: "Te paso dos caños esta noche. Uno es de Agus, para ser justos.",
-      createdAt: now - 3 * HOUR,
-      likedBy: [],
-      parentId: null,
-    },
-  ];
+  // El feed arranca vacío: las publicaciones de relleno se fueron cuando el
+  // compositor pasó a subir imágenes de verdad a Firebase Storage
+  // (`lib/storage/post-image.ts`). Lo que se postee desde la app es lo único
+  // que hay hasta que esto lea de Firestore.
+  const posts: Post[] = [];
+  const comments: CommentRow[] = [];
 
   const conversations: Conversation[] = [
     {
@@ -282,36 +168,10 @@ function seed(): Db {
     },
   ];
 
-  const notifications: NotificationRow[] = [
-    {
-      id: "n1",
-      userId: YO,
-      kind: "comment",
-      actorId: "leandro-atondo",
-      text: "Leandro Atondo comentó tu publicación",
-      href: "/post/p4",
-      at: now - 25 * MIN,
-    },
-    {
-      id: "n2",
-      userId: YO,
-      kind: "like",
-      actorId: "naza-sochan",
-      text: "A Naza Sochan le gustó tu publicación",
-      href: "/post/p4",
-      at: now - 3 * HOUR,
-    },
-    {
-      id: "n4",
-      userId: YO,
-      kind: "mention",
-      actorId: "martin-motta",
-      text: "Martin Motta te mencionó en un comentario",
-      href: "/post/p2",
-      at: now - 3 * DAY,
-      read: true,
-    },
-  ];
+  // Sin notificaciones de relleno: la campana arranca vacía y sólo muestra lo
+  // que generen las acciones en vivo (post nuevo, mensaje, cambio de cronograma,
+  // noticia publicada) vía `lib/social/notify.ts`.
+  const notifications: NotificationRow[] = [];
 
 
   return {

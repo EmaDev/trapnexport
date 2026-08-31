@@ -1,5 +1,5 @@
 import { db } from "@/lib/social/store";
-import type { GalleryItem, PlayerFicha, User } from "@/lib/social/types";
+import type { GalleryItem, NotificationKind, PlayerFicha, User } from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
 
 /** Lecturas del dominio, ya mapeadas a lo que esperan los componentes.
@@ -98,6 +98,9 @@ export interface NotificationVM {
   read: boolean;
   avatar?: string;
   href?: string;
+  /** con qué ícono la dibuja la librería cuando no hay `avatar` de actor
+   *  (los avisos de plataforma no lo tienen) */
+  tone?: "info" | "success" | "warning" | "danger" | "neutral";
 }
 
 /* ── helpers internos ────────────────────────────────────────────────────── */
@@ -315,21 +318,42 @@ export async function getConversation(
 
 /* ── notificaciones ──────────────────────────────────────────────────────── */
 
+/** Bajada genérica e ícono (vía `tone`) por tipo, para cuando la fila no trae
+ *  los suyos. El `tone` es lo que hace que los avisos de plataforma —sin avatar
+ *  de actor— muestren un ícono en lugar de un hueco. */
+const NOTIF_META: Record<
+  NotificationKind,
+  { description: string; tone: NotificationVM["tone"] }
+> = {
+  like: { description: "Tocá para abrir la publicación", tone: "neutral" },
+  comment: { description: "Tocá para abrir la publicación", tone: "neutral" },
+  mention: { description: "Tocá para abrir la publicación", tone: "neutral" },
+  post: { description: "Tocá para ver la publicación", tone: "info" },
+  message: { description: "Tocá para abrir la conversación", tone: "info" },
+  cronograma: { description: "Tocá para ver el cronograma", tone: "warning" },
+  noticia: { description: "Tocá para leer la noticia", tone: "info" },
+};
+
 export async function getNotifications(): Promise<NotificationVM[]> {
   const viewerId = db.currentUserId;
 
   return db.notifications
     .filter((n) => n.userId === viewerId)
     .sort((a, b) => b.at - a.at)
-    .map((n) => ({
-      id: n.id,
-      title: n.text,
-      description: "Tocá para abrir la publicación",
-      date: n.at,
-      read: !!n.read,
-      avatar: userById(n.actorId)?.avatar,
-      href: n.href,
-    }));
+    .map((n) => {
+      const meta = NOTIF_META[n.kind] ?? NOTIF_META.post;
+      return {
+        id: n.id,
+        title: n.text,
+        description: n.description ?? meta.description,
+        date: n.at,
+        read: !!n.read,
+        // Los avisos de plataforma no tienen actor: ahí manda el `tone`.
+        avatar: n.actorId ? userById(n.actorId)?.avatar : undefined,
+        href: n.href,
+        tone: meta.tone,
+      };
+    });
 }
 
 /* ── admin ───────────────────────────────────────────────────────────────── */

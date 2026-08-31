@@ -3,9 +3,9 @@
 import { getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
-/** Costura de Firebase del lado del cliente — auth y Firestore; Storage cuando
- *  haga falta.
+/** Costura de Firebase del lado del cliente — auth, Firestore y Storage.
  *
  *  `getApps()[0] ??` y no un módulo con guard manual: en `next dev`, HMR puede
  *  re-evaluar este archivo sin recargar la página, y `initializeApp` tira si
@@ -31,3 +31,11 @@ export const auth = getAuth(firebaseApp);
  *  recibiría el `uid` como un dato más del cliente y tendría que creerle.
  */
 export const db = getFirestore(firebaseApp);
+
+/** Storage, desde el navegador.
+ *
+ *  Las imágenes de las publicaciones se comprimen y se suben desde acá
+ *  (`lib/storage/post-image.ts`): por la Server Action que crea el post viaja
+ *  sólo la `downloadURL`, no el archivo. El bucket es
+ *  `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`, carpeta `trapnexport-post/`. */
+export const storage = getStorage(firebaseApp);

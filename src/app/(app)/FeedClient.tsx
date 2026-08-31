@@ -25,13 +25,10 @@ import type { PostVM } from "@/lib/social/queries";
 import { APP_NAME, LAUNCH_DATE } from "@/lib/site";
 import { useNotifications } from "./notifications-context";
 
-/** El degradé de `AppHeaderCardSlot` está hardcodeado en la librería
- *  (`from-[#6d5bf0] to-[#4b3fce]`) y no sale de los tokens del tema: la única
- *  forma de alinearlo con la marca es pisarlo con el modificador importante de
- *  Tailwind. Son los mismos dos valores que `--color-primary` y
- *  `--color-accent` del tema claro en globals.css — si cambia la paleta, esta
- *  constante se actualiza con ella. */
-export const HEADER_BRAND_GRADIENT = "!bg-[linear-gradient(135deg,#50108b,#752eb8)]";
+/** Degradé de marca para `AppHeaderCardSlot` vía `gradientClassName` (reemplaza
+ *  el violeta por defecto de la librería). Mismos valores que `--color-primary`
+ *  y `--color-accent` del tema claro en globals.css. */
+export const HEADER_BRAND_GRADIENT = "bg-[linear-gradient(135deg,#50108b,#752eb8)]";
 
 /** Badges rojos en las acciones del header del feed.
  *
@@ -47,10 +44,7 @@ export const HEADER_BRAND_GRADIENT = "!bg-[linear-gradient(135deg,#50108b,#752eb
  *  slot es `CountdownHero` y no tiene un solo `<button>`, así que no hay otro
  *  nodo al que pueda pegarle. */
 export const HEADER_RED_BADGES = [
-  // Con `!`: el `bg-white` del badge es una clase propia del componente y las
-  // dos reglas viven en la misma capa, así que sin importante gana la que
-  // Tailwind haya emitido última. (El `!` va adelante, como en la constante de
-  // arriba; la v4 acepta las dos posiciones y el archivo ya usa esta.)
+  // `!` para ganarle al `bg-white` propio del componente (misma capa).
   "[&_button>span.absolute]:!bg-danger",
   "[&_button>span.absolute]:!text-white",
   // El anillo original es del violeta viejo de la librería; sobre el degradé
@@ -87,81 +81,64 @@ export function FeedClient({
 
   return (
     <>
-      {/* `AppHeaderCardSlot` (lib-kit-components) no tiene slots de marca —su
-          interfaz sólo expone `leading`/`actions`/`card`, confirmado contra el
-          código instalado y su doc, que dice explícito "no tiene title ni
-          onBack"—, así que el escudo y el wordmark van superpuestos por
-          afuera, en un wrapper `relative` propio, y no como props del
-          componente. */}
-      <div className="relative">
-        <AppHeaderCardSlot
-          className={`${HEADER_BRAND_GRADIENT} ${HEADER_RED_BADGES}`}
-          // El botón de la izquierda conserva su destino de siempre —`/historia`,
-          // la pantalla del club— pero con el ícono que le corresponde: el
-          // escudo va en el hero, y dejarlo acá sería la tercera marca.
-          leading={<TrophyIcon />}
-          onLeadingClick={() => router.push("/historia")}
-          actions={[
-            {
-              id: "notif",
-              label: "Notificaciones",
-              icon: <BellIcon />,
-              // `unread || false`: un 0 pelado dibuja un badge rojo con un "0"
-              badge: unread || false,
-              onClick: open,
-            },
-            {
-              // La única puerta a los mensajes directos junto con la del foro:
-              // desde que el tab pasó a ser el foro, la mensajería vive acá y
-              // se lleva con ella el badge de no leídos.
-              id: "chat",
-              label: "Mensajes",
-              icon: <ChatIcon />,
-              badge: unreadChats || false,
-              onClick: () => router.push("/chat"),
-            },
-          ]}
-          // El componente traslada la card `cardMinHeight / 2` hacia abajo y
-          // reserva esa misma mitad de alto. Con el default (96) la card baja
-          // 48px y abre un hueco muerto entre el escudo y el contador; 32 la
-          // sube casi contra el hero y deja sólo un solape mínimo, que es el
-          // efecto "flotante" sin el aire de más.
-          cardMinHeight={32}
-          card={
-            <CountdownHero
-              until={LAUNCH_DATE}
-              variant="blocks"
-              size="xl"
-              tone="surface"
-              eyebrow="Lanzamiento"
-              expiredMessage="Ya está acá."
-            />
-          }
-        />
-
-        {/* Escudo y nombre van juntos, en fila, como un solo lockup de marca.
-            Separados —cada uno centrado por su cuenta— se pisan: el header sólo
-            expone una franja de 56px antes de la card, no hay lugar para
-            apilarlos.
-
-            `px-20` deja libres los ~72px de botones que el header tiene a cada
-            lado (leading + notificaciones + avatar), y `pointer-events-none`
-            evita que este bloque les robe los clicks.
-
-            El nombre sale de `APP_NAME` y no de un literal para que renombrar
-            la app siga siendo un solo cambio en `site.ts`. */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex h-14 items-center justify-center gap-2 px-20">
-          {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático */}
+      {/* Degradé de marca, escudo centrado en el slot `heroLogo` y badges
+          rojos alineados con el resto de la app. */}
+      <AppHeaderCardSlot
+        gradientClassName={HEADER_BRAND_GRADIENT}
+        className={HEADER_RED_BADGES}
+        // Trofeo → `/historia` (la pantalla del club).
+        leading={<TrophyIcon />}
+        onLeadingClick={() => router.push("/historia")}
+        // Sólo el escudo (el SVG ya trae el nombre). Necesita alto explícito:
+        // sin `width`/`height` propios, como flex-item de `heroLogo` colapsa a 0.
+        heroAlign="center"
+        heroLogoMaxHeight={90}
+        // Achica el `pb-5` que el componente mete fijo bajo el escudo, para
+        // pegarlo a la card.
+        heroClassName="!pb-1"
+        heroLogo={
+          /* eslint-disable-next-line @next/next/no-img-element -- SVG estático */
           <img
             src="/escudo.svg"
-            alt=""
-            className="h-9 w-auto shrink-0 object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
+            alt={APP_NAME}
+            className="block h-20 w-auto object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
           />
-          <span className="truncate text-[17px] font-black tracking-tight text-white">
-            {APP_NAME}
-          </span>
-        </div>
-      </div>
+        }
+        actions={[
+          {
+            id: "notif",
+            label: "Notificaciones",
+            icon: <BellIcon />,
+            // `unread || false`: un 0 pelado dibuja un badge rojo con un "0"
+            badge: unread || false,
+            onClick: open,
+          },
+          {
+            // La única puerta a los mensajes directos junto con la del foro:
+            // desde que el tab pasó a ser el foro, la mensajería vive acá y
+            // se lleva con ella el badge de no leídos.
+            id: "chat",
+            label: "Mensajes",
+            icon: <ChatIcon />,
+            badge: unreadChats || false,
+            onClick: () => router.push("/chat"),
+          },
+        ]}
+        // `cardOverlap` baja la card (más valor = más lejos del escudo); 0 la
+        // deja pegada al bloque del logo.
+        cardMinHeight={32}
+        cardOverlap={0}
+        card={
+          <CountdownHero
+            until={LAUNCH_DATE}
+            variant="blocks"
+            size="xl"
+            tone="surface"
+            eyebrow="Lanzamiento"
+            expiredMessage="Ya está acá."
+          />
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-4">
         {/* Portada del feed. `autoplay` se pausa solo al pasar el mouse o al

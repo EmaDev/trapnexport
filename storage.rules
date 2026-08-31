@@ -1,0 +1,27 @@
+rules_version = '2';
+
+// Reglas de Firebase Storage. Se despliegan con `firebase deploy --only storage`.
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Imágenes de las publicaciones del feed (`lib/storage/post-image.ts`).
+    //
+    // Son contenido público y no sensible: cualquiera las lee. La escritura hoy
+    // es abierta porque el feed corre sobre la cuenta semilla, sin Firebase
+    // Auth — pero acotada a imágenes de hasta 3 MB para que el bucket no se use
+    // como depósito de archivos arbitrarios. El compositor ya sube WebP de
+    // 80–160 KB; el margen es para no rechazar un caso raro.
+    //
+    // Cuando el feed pase a auth real: cambiar la condición por
+    // `request.auth != null && request.auth.uid == userId` en create, y dejar
+    // el delete atado al mismo dueño.
+    match /trapnexport-post/{userId}/{fileName} {
+      allow read: if true;
+
+      allow create, update: if request.resource.size < 3 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+
+      allow delete: if true;
+    }
+  }
+}

@@ -116,8 +116,12 @@ export interface GalleryItem {
 }
 
 export interface PostMediaItem {
+  /** `downloadURL` de Firebase Storage (ver `lib/storage/post-image.ts`) */
   src: string;
   alt: string;
+  /** ruta del archivo en el bucket (`trapnexport-post/…`), para borrarlo cuando
+   *  se elimina el post. Ausente en data semilla y en posts viejos sin subida. */
+  path?: string;
 }
 
 export interface Post {
@@ -160,15 +164,37 @@ export interface Conversation {
   messages: Message[];
 }
 
-export type NotificationKind = "like" | "comment" | "mention";
+/** Los tipos de aviso de campanita.
+ *
+ *  Los tres primeros los dispara otro usuario sobre algo tuyo (`actorId`
+ *  siempre presente). Los cuatro nuevos son de plataforma:
+ *
+ *  - `post`       — otra cuenta publicó en el feed
+ *  - `message`    — te llegó un mensaje privado
+ *  - `cronograma` — cambió el cronograma del evento (sin actor: lo edita el panel)
+ *  - `noticia`    — se publicó una noticia (sin actor)
+ */
+export type NotificationKind =
+  | "like"
+  | "comment"
+  | "mention"
+  | "post"
+  | "message"
+  | "cronograma"
+  | "noticia";
 
 export interface NotificationRow {
   id: string;
   /** dueño de la notificación */
   userId: UserId;
   kind: NotificationKind;
-  actorId: UserId;
+  /** quién la generó; ausente en los avisos de plataforma (`cronograma`,
+   *  `noticia`), que no los produce una persona sino el panel */
+  actorId?: UserId;
   text: string;
+  /** bajada propia de esta notificación; si falta, `getNotifications` pone una
+   *  genérica según el `kind` */
+  description?: string;
   href?: string;
   at: number;
   read?: boolean;

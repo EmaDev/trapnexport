@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CommentBox, SocialPost, useSnackbar, type CommentSort } from "lib-kit-components";
+import { CommentBox, SocialPost, useSnackbar } from "lib-kit-components";
 
 import {
   addComment,
@@ -22,8 +22,11 @@ import type { PostVM, SessionVM } from "@/lib/social/queries";
  *  tiene esas props** — su `SocialPostProps` termina en `children`. Así que la
  *  caja es siempre un `CommentBox` en el slot `children`, en las dos variantes:
  *
- *    mode="feed"    → compacta: 2 comentarios, sin hilos ni orden
- *    mode="detail"  → completa: hilos, orden, borrar
+ *    mode="feed"    → compacta: 2 comentarios, sin hilos
+ *    mode="detail"  → completa: hilos, borrar
+ *
+ *  El orden lo fija `CommentBox` (fijados primero, después recientes); ya no es
+ *  configurable.
  *
  *  Eso cumple igual la regla dura de la guía —nunca dos cajas de escritura en
  *  el mismo post— y el día que la librería se actualice, el feed puede pasar a
@@ -47,7 +50,6 @@ export function PostCard({
 
   const [liked, setLiked] = useState(post.liked);
   const [saved, setSaved] = useState(post.saved);
-  const [sort, setSort] = useState<CommentSort>("recent");
 
   const detail = mode === "detail";
 
@@ -103,8 +105,6 @@ export function PostCard({
           }
           allowReplies={detail}
           pageSize={detail ? 10 : 2}
-          sort={detail ? sort : "recent"}
-          onSortChange={detail ? setSort : undefined}
           title={detail ? "Comentarios" : `Comentarios (${post.counts.comments})`}
         />
       </SocialPost>

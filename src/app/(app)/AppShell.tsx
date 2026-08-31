@@ -73,6 +73,7 @@ const toAppNotification = (n: NotificationVM): AppNotification => ({
   read: n.read,
   avatar: n.avatar,
   href: n.href,
+  tone: n.tone,
 });
 
 export function AppShell({
@@ -101,6 +102,20 @@ export function AppShell({
   const [items, setItems] = useState<AppNotification[]>(() =>
     notifications.map(toAppNotification),
   );
+
+  // `items` es estado local para que marcar leída / descartar respondan al
+  // toque. Pero cuando algo dispara `router.refresh()` (publicar un post,
+  // volver del panel) el servidor manda una lista nueva con las notificaciones
+  // recién creadas y hay que adoptarla. Es el patrón de "ajustar estado cuando
+  // cambia una prop" de React —comparar contra la prop anterior en el render, no
+  // un efecto—: `getNotifications` ya trae las lecturas y descartes previos, así
+  // que reemplazar la lista entera no pierde nada.
+  const [prevNotifs, setPrevNotifs] = useState(notifications);
+  if (prevNotifs !== notifications) {
+    setPrevNotifs(notifications);
+    setItems(notifications.map(toAppNotification));
+  }
+
   const unread = items.filter((n) => !n.read).length;
 
   const ctx = useMemo(
