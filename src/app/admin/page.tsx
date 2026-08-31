@@ -9,6 +9,7 @@ import {
   UsersIcon,
 } from "@/components/atoms/icons";
 import { requireAdmin } from "@/lib/admin/auth";
+import { getCuentasStats } from "@/lib/admin/cuentas";
 import { getContenidoStats, getProximosEventos } from "@/lib/contenido/queries";
 import { TIPO_EVENTO } from "@/lib/contenido/types";
 import { getAdminStats } from "@/lib/social/queries";
@@ -50,8 +51,9 @@ const ACCESOS = [
 export default async function AdminHomePage() {
   await requireAdmin();
 
-  const [stats, contenido, proximos] = await Promise.all([
+  const [stats, cuentas, contenido, proximos] = await Promise.all([
     getAdminStats(),
+    getCuentasStats(),
     getContenidoStats(),
     getProximosEventos(4),
   ]);
@@ -92,13 +94,25 @@ export default async function AdminHomePage() {
             </div>
             <div>
               <p className="text-5xl font-bold leading-none tabular-nums">
-                {stats.usuarios.toLocaleString("es-AR")}
+                {cuentas.total.toLocaleString("es-AR")}
               </p>
               <p className="mt-2 text-sm text-white/80">
-                {stats.suspendidos > 0
-                  ? `${stats.suspendidos} suspendidas`
+                {cuentas.suspendidas > 0
+                  ? `${cuentas.suspendidas} suspendidas`
                   : "Ninguna suspendida"}
               </p>
+              {/* El único número del panel que significa "hay algo que hacer".
+                  Una solicitud sin resolver deja a una persona sin poder usar
+                  su cuenta y a un jugador bloqueado para quien sí sea, así que
+                  no puede quedar escondida adentro de otra pantalla. */}
+              {cuentas.pendientes > 0 && (
+                <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-sm font-semibold">
+                  {cuentas.pendientes}{" "}
+                  {cuentas.pendientes === 1
+                    ? "vínculo por autorizar"
+                    : "vínculos por autorizar"}
+                </p>
+              )}
             </div>
             <Link
               href="/admin/usuarios"

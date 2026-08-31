@@ -14,6 +14,7 @@ import {
   UsersIcon,
 } from "@/components/atoms/icons";
 import { APP_NAME } from "@/lib/site";
+import { SalirDelPanel } from "./SalirDelPanel";
 
 /** Shell del módulo privado. Deliberadamente NO comparte nada con el shell
  *  público más allá del tema:
@@ -86,11 +87,9 @@ function Brand() {
 export function AdminShell({
   children,
   adminEmail,
-  authEnabled,
 }: {
   children: React.ReactNode;
   adminEmail: string;
-  authEnabled: boolean;
 }) {
   return (
     <SnackbarProvider position="bottom-right">
@@ -105,6 +104,7 @@ export function AdminShell({
                 <Link href="/" className="font-medium text-primary">
                   Volver a la app
                 </Link>
+                <SalirDelPanel />
               </div>
             }
           />
@@ -116,21 +116,14 @@ export function AdminShell({
             brand={<Brand />}
             links={LINKS}
             actions={
-              <Link href="/" className="text-sm font-medium text-primary">
-                Ver app
-              </Link>
+              <div className="flex items-center gap-3 text-sm">
+                <Link href="/" className="font-medium text-primary">
+                  Ver app
+                </Link>
+                <SalirDelPanel />
+              </div>
             }
           />
-
-          {!authEnabled && (
-            <p
-              role="status"
-              className="border-b border-border bg-danger/10 px-4 py-2 text-center text-xs font-medium text-danger"
-            >
-              Panel sin autenticación: cualquiera con el link entra. Activá
-              ADMIN_AUTH_ENABLED antes de publicar.
-            </p>
-          )}
 
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8">
             {children}

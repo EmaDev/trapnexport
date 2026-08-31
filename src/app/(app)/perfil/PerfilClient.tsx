@@ -1,13 +1,22 @@
 "use client";
 
+import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { AppHeader, Button, Card, SafeAreaSpacer, Skeleton } from "lib-kit-components";
+import {
+  AppHeader,
+  Button,
+  Card,
+  SafeAreaSpacer,
+  Skeleton,
+  useSnackbar,
+} from "lib-kit-components";
 
 import {
   BellIcon,
   ChatIcon,
   HelpIcon,
+  LogoutIcon,
   ShirtIcon,
   UserIcon,
 } from "@/components/atoms/icons";
@@ -20,6 +29,7 @@ import { PlayerCardSheet } from "@/components/organisms/PlayerCardSheet";
 import { PostComposer } from "@/components/organisms/PostComposer";
 import { SharePostSheet } from "@/components/organisms/SharePostSheet";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { auth } from "@/lib/firebase/client";
 import type { CartaVM } from "@/lib/carta/carta";
 import { registerShare } from "@/lib/social/actions";
 import type { PostVM, ProfileVM } from "@/lib/social/queries";
@@ -67,18 +77,41 @@ export function PerfilClient({
   carta: CartaVM;
 }) {
   const router = useRouter();
+  const { snack } = useSnackbar();
   const { unread, open, session, unreadChats } = useNotifications();
-  const { user, loading } = useAuth();
+  const { account, loading } = useAuth();
   const [sharing, setSharing] = useState<PostVM | null>(null);
+  const [saliendo, setSaliendo] = useState(false);
   const [verCarta, setVerCarta] = useState(false);
   const [verInstalar, setVerInstalar] = useState(false);
 
   /** El header sin las acciones que dependen de la cuenta. La ayuda de
    *  instalación queda: sirve igual —o más— para quien todavía no entró. */
+  /** Cierra la sesión y devuelve al feed.
+   *
+   *  Va a `/` y no se queda acá porque esta pantalla sin sesión es el cartel de
+   *  "entrá o registrate": quedarse mirándolo después de tocar el botón se lee
+   *  como que algo salió mal. `replace` y no `push`: el perfil ya no es un
+   *  lugar al que tenga sentido volver con el gesto de atrás.
+   *
+   *  Sin `finally` que baje `saliendo`: en el camino feliz esta pantalla se
+   *  desmonta, y apagar el spinner de un componente desmontado es un warning
+   *  de React. Sólo se baja si `signOut` falla y seguimos acá. */
+  const cerrarSesion = async () => {
+    setSaliendo(true);
+    try {
+      await signOut(auth);
+      router.replace("/");
+    } catch {
+      setSaliendo(false);
+      snack({ message: "No se pudo cerrar la sesión. Probá de nuevo.", variant: "error" });
+    }
+  };
+
   const cabecera = (
     <AppHeader
       title="Mi perfil"
-      subtitle={user ? `@${profile.handle}` : undefined}
+      subtitle={account ? `@${account.handle}` : undefined}
       variant="solid"
       // `leading` de `AppHeader` es un nodo suelto, no un botón: no tiene
       // `onClick`. Acá va la marca, que no navega a ningún lado.
@@ -116,7 +149,7 @@ export function PerfilClient({
     );
   }
 
-  if (!user) {
+  if (!account) {
     return (
       <>
         {cabecera}
@@ -250,6 +283,22 @@ export function PerfilClient({
         {posts.map((post) => (
           <PostCard key={post.id} post={post} session={session} onShare={setSharing} />
         ))}
+
+        {/* Cerrar sesión va acá abajo y no entre las acciones del header por
+            dos razones: es lo único de esta pantalla que te saca de ella, y en
+            el header sería un ícono a un toque de distancia de las
+            notificaciones. Sin diálogo de confirmación: no se pierde nada —los
+            datos quedan— y confirmar una acción reversible es fricción. */}
+        <Button
+          variant="ghost"
+          fullWidth
+          className="mt-4 text-danger"
+          loading={saliendo}
+          leftIcon={<LogoutIcon width="1em" height="1em" />}
+          onClick={cerrarSesion}
+        >
+          Cerrar sesión
+        </Button>
 
         <SafeAreaSpacer edge="bottom" min={8} />
       </div>

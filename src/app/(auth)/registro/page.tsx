@@ -1,9 +1,10 @@
-import { getClaimablePlayers } from "@/lib/social/queries";
 import { RegistroClient } from "./RegistroClient";
 
 export const metadata = { title: "Crear cuenta" };
 
-export default async function RegistroPage() {
-  const players = await getClaimablePlayers();
-  return <RegistroClient players={players} />;
+/** El plantel ya no se inyecta desde acá: `trapnexport-jugador` se lee con el
+ *  SDK del navegador, que es el único con credenciales en el flujo público.
+ *  Esta página quedó como el server component mínimo que fija el `<title>`. */
+export default function RegistroPage() {
+  return <RegistroClient />;
 }

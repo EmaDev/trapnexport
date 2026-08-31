@@ -3,10 +3,12 @@
 import { signInWithEmailAndPassword } from "firebase/auth";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Input, useSnackbar } from "lib-kit-components";
 
 import { EyeIcon, EyeOffIcon } from "@/components/atoms/icons";
+import { GoogleSignInButton, OSeparador } from "@/components/organisms/GoogleSignInButton";
+import { useAuth } from "@/lib/auth/AuthContext";
 import { authErrorMessage } from "@/lib/auth/errors";
 import { auth } from "@/lib/firebase/client";
 
@@ -14,12 +16,25 @@ export function LoginClient() {
   const router = useRouter();
   const { snack } = useSnackbar();
   const next = useSearchParams().get("next") || "/";
+  const { user, account, loading } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  /*  Quien ya tiene sesión no tiene nada que hacer en el login.
+   *
+   *  Cubre tres casos con la misma regla, y el tercero es el que importa: al
+   *  volver del redirect de Google se cae en esta pantalla con sesión recién
+   *  hecha, y es acá donde se decide si va al feed o a terminar el alta.
+   *  `account` en `null` con `loading` ya resuelto significa credencial sin
+   *  perfil — no "sin sesión". */
+  useEffect(() => {
+    if (loading || !user) return;
+    router.replace(account ? next : "/completar-perfil");
+  }, [loading, user, account, next, router]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +63,7 @@ export function LoginClient() {
           autoComplete="email"
           required
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
         />
         <Input
           label="Contraseña"
@@ -56,7 +71,7 @@ export function LoginClient() {
           autoComplete="current-password"
           required
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
           rightIcon={
             <button
               type="button"
@@ -78,6 +93,14 @@ export function LoginClient() {
           Ingresar
         </Button>
       </form>
+
+      <OSeparador />
+
+      <GoogleSignInButton
+        next={next}
+        disabled={submitting}
+        onError={(m) => setError(m || null)}
+      />
 
       <p className="mt-6 text-center text-sm text-muted">
         ¿No tenés cuenta?{" "}

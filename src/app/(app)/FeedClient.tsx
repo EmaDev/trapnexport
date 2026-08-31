@@ -83,7 +83,7 @@ export function FeedClient({
   const { unread, open, session, unreadChats } = useNotifications();
   const reduced = usePrefersReducedMotion();
   const [sharing, setSharing] = useState<PostVM | null>(null);
-  const { user, loading } = useAuth();
+  const { account, loading } = useAuth();
 
   return (
     <>
@@ -182,7 +182,7 @@ export function FeedClient({
             corre sobre la cuenta semilla), pero votar sí la pide de verdad —
             ver el gate en `FeedTabs`. `!loading` evita el parpadeo mientras
             Firebase resuelve el primer `onAuthStateChanged`. */}
-        {!loading && !user && (
+        {!loading && !account && (
           <Card
             variant="outline"
             padding="md"

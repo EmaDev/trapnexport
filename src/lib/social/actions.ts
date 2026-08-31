@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 
-import { avatarUrl } from "@/lib/media";
 import { db, newId } from "@/lib/social/store";
 import type {
   GalleryItem,
@@ -10,7 +9,6 @@ import type {
   PlayerFicha,
   PostMediaItem,
   Posicion,
-  RegisterResult,
 } from "@/lib/social/types";
 
 /** Escrituras del dominio, como Server Actions.
@@ -295,66 +293,12 @@ export async function dismissNotification(id: string): Promise<void> {
 
 /* ── cuentas (registro) ──────────────────────────────────────────────────── */
 
-/** Alta de una cuenta que NO es del plantel: nombre y handle libres, sin
- *  reclamo ni revisión de admin. El uid ya existe —el formulario llama a
- *  Firebase Auth antes que a esto— y acá sólo se crea el perfil social. */
-export async function registerFan(input: {
-  authUid: string;
-  name: string;
-  handle: string;
-}): Promise<RegisterResult> {
-  const name = input.name.trim();
-  const handle = input.handle.trim().toLowerCase();
-
-  if (name.length < 2) return { ok: false, error: "Ingresá tu nombre." };
-  if (!/^[a-z0-9._]{3,20}$/.test(handle)) {
-    return {
-      ok: false,
-      error: "El usuario va de 3 a 20 caracteres: minúsculas, números, punto o guion bajo.",
-    };
-  }
-  if (db.users.some((u) => u.handle.toLowerCase() === handle)) {
-    return { ok: false, error: "Ese nombre de usuario ya está en uso." };
-  }
-
-  db.users.push({
-    id: newId("u"),
-    name,
-    handle,
-    avatar: avatarUrl(name, handle),
-    authUid: input.authUid,
-    joinedAt: Date.now(),
-  });
-
-  revalidatePath("/admin/usuarios");
-  revalidatePath("/admin");
-  return { ok: true };
-}
-
-/** Alguien dice ser un jugador del plantel: la cuenta ya existe (viene de
- *  `JUGADORES`, sembrada en `store.ts`), así que esto no crea una fila nueva
- *  — vincula el uid recién creado en Firebase Auth a la cuenta del jugador
- *  elegido y deja el reclamo en `pending` hasta que el admin lo confirme. */
-export async function claimPlayerAccount(input: {
-  playerId: string;
-  authUid: string;
-  note?: string;
-}): Promise<RegisterResult> {
-  const player = db.users.find((u) => u.id === input.playerId);
-  if (!player) return { ok: false, error: "Ese jugador no existe." };
-  if (player.authUid) return { ok: false, error: "Esa cuenta ya fue reclamada por alguien." };
-
-  player.authUid = input.authUid;
-  player.claim = {
-    note: input.note?.trim() || undefined,
-    status: "pending",
-    requestedAt: Date.now(),
-  };
-
-  revalidatePath("/admin/usuarios");
-  revalidatePath("/admin");
-  return { ok: true };
-}
+/*  El alta ya NO pasa por acá. Vive en `lib/auth/register.ts` y escribe en
+ *  Firestore desde el navegador: la transacción que reserva el handle tiene que
+ *  ir firmada con el token del usuario para que `firestore.rules` la pueda
+ *  validar, y una server action recibiría el uid como un campo más del
+ *  formulario. Lo que queda en este store son las cuentas semilla del feed.
+ */
 
 /* ── moderación (sólo /admin) ────────────────────────────────────────────── */
 
@@ -377,37 +321,6 @@ export async function deletePost(postId: string): Promise<void> {
   revalidatePath("/admin/publicaciones");
 }
 
-export async function setUserSuspended(userId: string, suspended: boolean): Promise<void> {
-  const user = db.users.find((u) => u.id === userId);
-  if (!user || user.id === me()) return;
-
-  user.suspended = suspended;
-  revalidatePublic();
-  revalidatePath("/admin");
-  revalidatePath("/admin/usuarios");
-}
-
-/** El admin confirma (o no) que quien se registró diciendo "soy Fulano" es
- *  realmente Fulano. Aprobar marca la cuenta como verificada; rechazar libera
- *  el `authUid` para que la cuenta vuelva a estar disponible — la persona
- *  puede reintentar, o el jugador real puede reclamarla después. */
-export async function reviewClaim(
-  userId: string,
-  decision: "approved" | "rejected",
-): Promise<void> {
-  const user = db.users.find((u) => u.id === userId);
-  if (!user?.claim || user.claim.status !== "pending") return;
-
-  user.claim.status = decision;
-  user.claim.reviewedAt = Date.now();
-
-  if (decision === "approved") {
-    user.verified = true;
-  } else {
-    user.authUid = undefined;
-  }
-
-  revalidatePublic();
-  revalidatePath("/admin");
-  revalidatePath("/admin/usuarios");
-}
+/*  Suspender cuentas y revisar reclamos ya no vive acá: esas operaciones son
+ *  sobre cuentas reales de Firestore y las hace `lib/admin/acciones.ts` con el
+ *  Admin SDK. Este store sólo tiene el contenido semilla del feed. */

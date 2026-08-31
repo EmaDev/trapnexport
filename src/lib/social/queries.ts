@@ -1,7 +1,6 @@
 import { db } from "@/lib/social/store";
 import type { GalleryItem, PlayerFicha, User } from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
-import { JUGADORES } from "@/lib/trap-awards";
 
 /** Lecturas del dominio, ya mapeadas a lo que esperan los componentes.
  *
@@ -164,29 +163,6 @@ const toPostVM = (postId: string, viewerId: string): PostVM | null => {
 export async function getSession(): Promise<SessionVM> {
   const me = userById(db.currentUserId)!;
   return { id: me.id, name: me.name, handle: me.handle, avatar: me.avatar };
-}
-
-/* ── registro ────────────────────────────────────────────────────────────── */
-
-export interface ClaimablePlayerVM {
-  id: string;
-  name: string;
-  nickname: string;
-  /** ya hay un uid de Firebase Auth vinculado — no se puede volver a elegir */
-  claimed: boolean;
-}
-
-/** El plantel completo (`JUGADORES`, `lib/trap-awards.ts`) con el estado de
- *  reclamo de cada cuenta, para el dropdown de "Soy miembro del equipo" del
- *  registro. Devuelve los dieciocho y no sólo los libres: mostrar "ya
- *  registrado" en gris es más claro que hacerlos desaparecer. */
-export async function getClaimablePlayers(): Promise<ClaimablePlayerVM[]> {
-  return JUGADORES.map((j) => ({
-    id: j.id,
-    name: j.nombre,
-    nickname: j.apodo,
-    claimed: Boolean(userById(j.id)?.authUid),
-  }));
 }
 
 /* ── feed y posts ────────────────────────────────────────────────────────── */
@@ -358,28 +334,6 @@ export async function getNotifications(): Promise<NotificationVM[]> {
 
 /* ── admin ───────────────────────────────────────────────────────────────── */
 
-export interface AdminUserRow {
-  id: string;
-  name: string;
-  handle: string;
-  avatar: string;
-  posts: number;
-  alta: string;
-  estado: "activa" | "suspendida";
-  verificado: boolean;
-  /** reclamo de identidad (jugador) esperando revisión */
-  pendiente: boolean;
-}
-
-export interface AdminClaimRow {
-  userId: string;
-  playerName: string;
-  handle: string;
-  avatar: string;
-  note?: string;
-  requestedAt: string;
-}
-
 export interface AdminPostRow {
   id: string;
   autor: string;
@@ -420,38 +374,6 @@ export async function getAdminStats(): Promise<AdminStats> {
     comentarios: db.comments.length,
     postsPorDia,
   };
-}
-
-export async function getAdminUsers(): Promise<AdminUserRow[]> {
-  return db.users
-    .map((u) => ({
-      id: u.id,
-      name: u.name,
-      handle: u.handle,
-      avatar: u.avatar,
-      posts: db.posts.filter((p) => p.authorId === u.id).length,
-      alta: shortDate(u.joinedAt),
-      estado: (u.suspended ? "suspendida" : "activa") as AdminUserRow["estado"],
-      verificado: Boolean(u.verified),
-      pendiente: u.claim?.status === "pending",
-    }))
-    .sort((a, b) => b.posts - a.posts);
-}
-
-/** Cuentas del plantel reclamadas y esperando que el admin confirme que
- *  quien se registró es quien dice ser. */
-export async function getPendingClaims(): Promise<AdminClaimRow[]> {
-  return db.users
-    .filter((u) => u.claim?.status === "pending")
-    .map((u) => ({
-      userId: u.id,
-      playerName: u.name,
-      handle: u.handle,
-      avatar: u.avatar,
-      note: u.claim?.note,
-      requestedAt: shortDate(u.claim!.requestedAt),
-    }))
-    .sort((a, b) => a.playerName.localeCompare(b.playerName));
 }
 
 export async function getAdminPosts(): Promise<AdminPostRow[]> {

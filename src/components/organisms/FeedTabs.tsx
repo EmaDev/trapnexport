@@ -275,7 +275,7 @@ const NOTICIAS: { id: string; title: string; at: string; summary: string }[] = [
 export function FeedTabs({ cronograma }: { cronograma: Cronograma }) {
   const { snack } = useSnackbar();
   const router = useRouter();
-  const { user } = useAuth();
+  const { account } = useAuth();
   const [tab, setTab] = useState<string>("encuesta");
 
   // Sin backend de encuestas, el voto vive en la pantalla. Los conteos se
@@ -292,7 +292,7 @@ export function FeedTabs({ cronograma }: { cronograma: Cronograma }) {
   const vote = (premioId: string, ids: string[]) => {
     // Se ve el feed sin sesión, pero votar no: sin esto `onVote` guardaría el
     // voto igual y recién al refrescar se notaría que nunca se registró.
-    if (!user) {
+    if (!account) {
       snack({
         message: "Necesitás iniciar sesión para votar",
         variant: "neutral",

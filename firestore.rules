@@ -1,0 +1,172 @@
+rules_version = '2';
+
+/*  Reglas de Firestore de Trap N Export.
+ *
+ *  El alta de una cuenta la escribe **el navegador**, no el servidor: no hay
+ *  credenciales de servicio en el flujo de registro, así que estas reglas no
+ *  son una segunda barrera detrás de una validación de servidor — son *la*
+ *  validación. Todo lo que no esté chequeado acá, se puede escribir a mano
+ *  desde la consola del navegador.
+ *
+ *  Dos cosas que hacen falta entender para leerlas:
+ *
+ *  1. `getAfter()` mira cómo queda un documento **al final de la transacción**.
+ *     Es lo que permite exigir que crear `trapnexport-user/{uid}` venga
+ *     acompañado de la reserva de su handle en la misma transacción: sin eso,
+ *     cada documento se validaría solo y el handle no sería único.
+ *  2. El rol de admin **no se lee de Firestore**. Sale del custom claim
+ *     `admin` del token (`request.auth.token.admin`). Un campo `role: "admin"`
+ *     dentro de un documento que su propio dueño puede escribir no es un
+ *     permiso, es una sugerencia.
+ *
+ *  Desplegar: `firebase deploy --only firestore:rules`.
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /* ── helpers ─────────────────────────────────────────────────────────── */
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/trapnexport-user/$(uid);
+    }
+
+    function handlePath(handle) {
+      return /databases/$(database)/documents/trapnexport-handle/$(handle);
+    }
+
+    /** Las claves que el dueño de la cuenta puede tocar después del alta.
+     *
+     *  Todo lo demás es inmutable desde el cliente a propósito: `handle` porque
+     *  cambiarlo sin mover la reserva rompería la unicidad; `role`, `status`,
+     *  `verified` y `claim` porque son permisos y moderación; `stats` porque
+     *  son contadores —si el dueño los escribe, el número deja de significar
+     *  algo—; `uid` y `createdAt` porque son la identidad del documento.
+     */
+    function editableByOwner() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['name', 'avatar', 'avatarPath', 'bio', 'ficha',
+                  'updatedAt', 'lastSeenAt']);
+    }
+
+    /** Lo que tiene que cumplir un `UserDoc` recién creado.
+     *
+     *  `status` se deriva de si hay reclamo: una cuenta de hincha nace activa,
+     *  una que dice ser del plantel nace `pending` y no puede auto-aprobarse.
+     */
+    function validNewUser(uid) {
+      let d = request.resource.data;
+      let claiming = 'playerId' in d;
+
+      return d.uid == uid
+        && d.handle is string
+        && d.handle.matches('^[a-z0-9._]{3,20}$')
+        && d.name is string && d.name.size() >= 2 && d.name.size() <= 60
+        && d.avatar is string
+        && d.role in ['fan', 'player']
+        && d.verified == false
+        && d.status == (claiming ? 'pending' : 'active')
+        && d.stats.posts == 0 && d.stats.comments == 0 && d.stats.gallery == 0
+        && d.createdAt == request.time
+        && d.updatedAt == request.time
+        // El handle queda reservado en la MISMA transacción, o no hay alta.
+        && getAfter(handlePath(d.handle)).data.uid == uid
+        // Un reclamo nace pendiente. Aprobarlo es un update, y sólo del admin.
+        && (!claiming || (d.claim.status == 'pending' && d.role == 'player'));
+    }
+
+    /* ── trapnexport-user ────────────────────────────────────────────────── */
+
+    match /trapnexport-user/{uid} {
+      /*  Lectura pública: el feed necesita nombre y avatar del autor de cada
+       *  publicación. Por eso este documento no tiene el email — ese vive en
+       *  la subcolección `private/`. */
+      allow read: if true;
+
+      allow create: if isSelf(uid) && validNewUser(uid);
+      allow update: if isAdmin() || (isSelf(uid) && editableByOwner());
+      allow delete: if isAdmin();
+
+      /*  Email, proveedores, suscripciones push y preferencias. Nadie más que
+       *  el dueño; el panel los lee con el Admin SDK, que ignora las reglas. */
+      match /private/{docId} {
+        allow read, write: if isSelf(uid);
+      }
+
+      /*  El carrete personal: se ve en el perfil público, lo escribe el dueño. */
+      match /gallery/{itemId} {
+        allow read: if true;
+        allow create, update, delete: if isSelf(uid) || isAdmin();
+      }
+    }
+
+    /* ── trapnexport-handle ──────────────────────────────────────────────── */
+
+    match /trapnexport-handle/{handle} {
+      /*  Lectura pública para que el formulario avise "ese usuario ya existe"
+       *  antes de mandar. Sólo expone qué handles están tomados, que es
+       *  exactamente lo que ya se ve entrando a `/u/{handle}`. */
+      allow read: if true;
+
+      /*  El espejo de `validNewUser`: la reserva sólo vale si el documento de
+       *  usuario que queda al final de la transacción declara este handle. Sin
+       *  esto se podrían acaparar nombres sin crear ninguna cuenta. */
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(userPath(request.auth.uid)).data.handle == handle;
+
+      /*  Cambiar de handle es borrar esta reserva y crear la nueva, atómico.
+       *  Un update in-place dejaría el documento viejo apuntando a otra cuenta. */
+      allow update: if false;
+      allow delete: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    /* ── trapnexport-jugador ─────────────────────────────────────────────── */
+
+    match /trapnexport-jugador/{slug} {
+      allow read: if true;
+
+      /*  El plantel lo carga el seed con el Admin SDK (`yarn seed:jugadores`).
+       *  Que el cliente pueda crear jugadores sería que cualquiera se invente
+       *  un integrante del club. */
+      allow create, delete: if isAdmin();
+
+      /*  La única escritura que puede hacer el cliente: tomar un jugador libre.
+       *
+       *  `claimedBy == null` es lo que hace que el reclamo sea único — dos
+       *  personas registrándose a la vez como el mismo jugador chocan acá, y
+       *  la segunda transacción falla entera. `getAfter` cierra el otro lado:
+       *  no se puede marcar un jugador como propio sin que la cuenta que queda
+       *  creada lo declare en su `playerId`.
+       */
+      allow update: if isAdmin() || (
+        signedIn()
+        && resource.data.claimedBy == null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['claimedBy'])
+        && request.resource.data.claimedBy == request.auth.uid
+        && getAfter(userPath(request.auth.uid)).data.playerId == slug
+      );
+    }
+
+    /* ── todo lo demás ───────────────────────────────────────────────────── */
+
+    /*  El resto del dominio (publicaciones, comentarios, chat, contenido del
+     *  club) todavía vive en el store en memoria. Hasta que migre, cerrado:
+     *  una colección sin regla explícita no puede quedar abierta por olvido. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
