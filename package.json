@@ -1,0 +1,38 @@
+{
+  "name": "trapnexport",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "lint": "eslint",
+    "icons": "node scripts/generate-icons.mjs",
+    "vapid": "node scripts/generate-vapid-keys.mjs"
+  },
+  "dependencies": {
+    "firebase": "^12.17.0",
+    "firebase-admin": "^14.2.0",
+    "framer-motion": "^12.43.0",
+    "lib-kit-components": "github:EmaDev/kit-componentes",
+    "next": "16.2.12",
+    "qr-code-styling": "^1.9.2",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "web-push": "^3.6.7"
+  },
+  "overrides": {
+    "jose": "4.15.9"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,292 @@
+@import "tailwindcss";
+@import "lib-kit-components/styles.css";
+
+/* Tailwind v4 no escanea node_modules por defecto: sin esto, las clases que
+   usan los componentes de la librería (compilados en dist/) no se generan. */
+@source "../../node_modules/lib-kit-components/dist";
+
+/* ============================
+   MARCA — Trap N Export
+   Pisa los tokens de la librería (mismo nombre de var, definidos después).
+
+   Un solo color —#50108b, un violeta muy oscuro— sobre neutros puros: blanco,
+   negro y grises sin tinte. Nada de azul ni de cálido en los neutros: si el
+   único color de la marca es el violeta, cualquier temperatura en el gris
+   compite con él y la paleta deja de leerse como "violeta + blanco y negro".
+
+   `accent` es el MISMO violeta aclarado, no un segundo color: existe sólo para
+   que el degradé primary → accent (`Card variant="gradient"`, `SplashScreen
+   background="brand"`, la cabecera del feed, el ícono de la PWA) tenga a dónde
+   ir. Un degradé de un color a sí mismo es una banda plana.
+
+   Contraste sobre blanco: primary 11.8:1, accent 7.4:1, muted 7.0:1.
+
+   `success` y `danger` se declaran acá (la librería trae los suyos) porque el
+   verde por defecto no llega a 4.5:1 sobre blanco.
+   ============================ */
+@theme {
+  --color-primary: #50108b;
+  --color-primary-hover: #3d0a6b;
+  --color-accent: #752eb8;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f5f5f5;
+  --color-foreground: #0a0a0a;
+  --color-muted: #595959;
+  --color-border: #e5e5e5;
+  --color-success: #15803d;
+  --color-danger: #dc2626;
+
+  --font-sans: var(--font-app-sans), "Inter", system-ui, sans-serif;
+}
+
+/* En oscuro el violeta se aclara manteniendo el tono (271°): #50108b sobre un
+   fondo casi negro da 1.7:1 — ilegible. Subir el primario y no bajar el fondo
+   es lo correcto: el fondo ya es negro, no hay a dónde bajar.
+
+   Contraste sobre #0a0a0a: primary 7.2:1, muted 7.8:1. */
+.dark {
+  --color-primary: #b986ea;
+  --color-primary-hover: #cfa8f2;
+  --color-accent: #c8a2eb;
+  --color-surface: #0a0a0a;
+  --color-surface-alt: #171717;
+  --color-foreground: #f5f5f5;
+  --color-muted: #a3a3a3;
+  --color-border: #2a2a2a;
+  --color-success: #4ade80;
+  --color-danger: #f87171;
+}
+
+/* ============================
+   scrollbar-none
+
+   La librería aplica esta clase a todo lo que scrollea en horizontal (el
+   tablist de `Tabs scrollable`, los tracks de `ChipCarousel`), pero **no la
+   define** en su `globals.css`: sólo existe como string en el bundle. Sin
+   esto la clase es un no-op y esas filas muestran la barra nativa.
+
+   Va como `@utility` y no como una regla suelta para que Tailwind la registre
+   de verdad y admita variantes.
+   ============================ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Acompaña la clase `dark` del <html>: pinta los controles nativos
+   (scrollbars, inputs) y el fondo del overscroll. */
+html {
+  color-scheme: light;
+  background-color: var(--color-surface);
+}
+html.dark {
+  color-scheme: dark;
+}
+
+/* ============================
+   INVITACIÓN — los efectos de la tarjeta
+
+   Los bucles ambientales de `InvitationEfectos.tsx` viven acá y no en Framer.
+   Son animaciones infinitas de veinte segundos que nadie mira de frente —el
+   brillo que barre, las luces que derivan, las chispas que suben— y en CSS las
+   corre el compositor sin pasar por el hilo principal ni por un `rAF` por
+   cuadro. Framer se queda con lo que necesita orquestación (la entrada, el
+   sobre abriéndose, el estallido de papelitos) y con lo que depende del
+   puntero, que no se puede expresar en un `@keyframes`.
+
+   Regla al tocar esto: ninguna de estas clases puede caer sobre un elemento
+   que Framer también anime. Una animación CSS le gana al `style` inline, así
+   que compartir propiedad —típicamente `transform` u `opacity`— con un
+   `motion.*` deja el `variants` sin efecto. Por eso el lacre pulsa en un anillo
+   aparte y el cartel de "tocá para abrir" flota en un `span` de adentro.
+   ============================ */
+
+/* El barrido especular: una banda inclinada que cruza la tarjeta cada seis
+   segundos. Es el aviso de "esto se mueve" para quien abre el link y se queda
+   quieto mirando. */
+.inv-barrido {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 38%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  mix-blend-mode: overlay;
+  animation: inv-barrido 6.5s ease-in-out infinite;
+}
+@keyframes inv-barrido {
+  0%,
+  8% {
+    transform: translateX(-160%) skewX(-14deg);
+  }
+  38%,
+  100% {
+    transform: translateX(360%) skewX(-14deg);
+  }
+}
+
+/* Las motas del efecto holográfico. La profundidad llega por `--inv-tz` y no
+   por el `style` inline: el `transform` del `@keyframes` pisaría un
+   `translateZ` puesto inline, y las siete motas quedarían pegadas al plano de
+   la tarjeta —o sea, invisibles como efecto 3D. */
+.inv-mota {
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+  animation: inv-mota 5.5s ease-in-out infinite;
+}
+@keyframes inv-mota {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateZ(var(--inv-tz, 0px)) translateY(7px);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translateZ(var(--inv-tz, 0px)) translateY(-7px);
+  }
+}
+
+/* El anillo que late alrededor del lacre del sobre. */
+.inv-anillo {
+  animation: inv-anillo 2.4s ease-out infinite;
+}
+@keyframes inv-anillo {
+  0% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
+/* "Tocá para abrir". */
+.inv-late {
+  animation: inv-late 1.9s ease-in-out infinite;
+}
+@keyframes inv-late {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* La flotación de reposo, para después de abrir el sobre y para la aurora. */
+.inv-flota {
+  animation: inv-flota 5.5s ease-in-out infinite;
+}
+.inv-flota-lento {
+  animation: inv-flota 8s ease-in-out infinite;
+}
+@keyframes inv-flota {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-9px);
+  }
+}
+
+/* Las tres manchas de luz de la aurora. Distinta duración y arranque negativo
+   en cada una para que no vuelvan a alinearse nunca: tres bucles del mismo
+   largo se sincronizan y las tres luces laten juntas, que es lo contrario de
+   una aurora. */
+.inv-aurora {
+  position: absolute;
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  filter: blur(70px);
+  opacity: 0.5;
+  animation: inv-deriva 22s ease-in-out infinite;
+}
+.inv-aurora-1 {
+  width: 60%;
+  left: -10%;
+  top: -6%;
+  background: #7a2fd0;
+}
+.inv-aurora-2 {
+  width: 55%;
+  right: -12%;
+  top: 22%;
+  background: #c8a2eb;
+  animation-duration: 27s;
+  animation-delay: -8s;
+}
+.inv-aurora-3 {
+  width: 65%;
+  left: 10%;
+  bottom: -14%;
+  background: #50108b;
+  animation-duration: 19s;
+  animation-delay: -14s;
+}
+@keyframes inv-deriva {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(12%, -8%, 0) scale(1.16);
+  }
+  66% {
+    transform: translate3d(-10%, 9%, 0) scale(0.92);
+  }
+}
+
+/* Las chispas que suben. La duración y el retardo los pone el componente desde
+   la semilla; el `animation-duration` de acá es sólo el piso por si faltara. */
+.inv-chispa {
+  position: absolute;
+  bottom: -4%;
+  border-radius: 9999px;
+  background: #ffffff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.85);
+  animation-name: inv-sube;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-duration: 12s;
+}
+@keyframes inv-sube {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  14%,
+  86% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-720px) scale(1.1);
+  }
+}
+
+/* El respaldo de `quieto`: los componentes ya no montan casi nada con
+   `prefers-reduced-motion`, pero la consulta va igual. Lo que decide si algo
+   se mueve tiene que estar también en CSS: si mañana una de estas clases se
+   usa en otro lado, la preferencia de la persona no depende de que quien la
+   use se acuerde de pasar la prop. */
+@media (prefers-reduced-motion: reduce) {
+  .inv-barrido,
+  .inv-mota,
+  .inv-chispa {
+    display: none;
+  }
+  .inv-anillo,
+  .inv-late,
+  .inv-flota,
+  .inv-flota-lento,
+  .inv-aurora {
+    animation: none;
+  }
+}

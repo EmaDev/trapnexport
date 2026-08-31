@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" role="img"
+     aria-label="Escudo de Trap N Export">
+  <title>Trap N Export</title>
+
+  <!--
+    EL ESCUDO DEL CLUB.
+
+    Reconstrucción vectorial del escudo: tres estrellas doradas, blasón con
+    borde negro y filete blanco, banda superior con TRAP, cuadrante violeta con
+    cruz y cinco bastones negros a la derecha.
+
+    Tres decisiones que conviene no deshacer sin querer:
+
+    1 · Las letras de TRAP son formas, no <text>. Este archivo se sirve como
+        imagen (`<img src="/escudo.svg">`), y una imagen SVG no puede usar la
+        tipografía que carga la página: con <text> las letras salen con la
+        fuente que tenga cada sistema y el logo cambia de forma según el
+        dispositivo.
+
+    2 · Todo lo de adentro va recortado con `clipPath` al blasón interior. Los
+        bastones y el violeta terminan en diagonal porque el escudo los corta,
+        no porque cada uno tenga su diagonal calculada: así, si se ajusta la
+        silueta, el contenido la sigue solo.
+
+    3 · Los colores son literales y no tokens del tema. Es un asset de marca,
+        no UI: el violeta del escudo es el del escudo, y no tiene que aclararse
+        en modo oscuro. El filete blanco es el que lo separa de cualquier fondo.
+  -->
+
+  <defs>
+    <linearGradient id="oro" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#f8db63"/>
+      <stop offset="0.5" stop-color="#e0ac2b"/>
+      <stop offset="1" stop-color="#c08a17"/>
+    </linearGradient>
+
+    <!-- Estrella de cinco puntas, radio 1, apuntando arriba. Radio interior
+         0.382 = 1/φ², la proporción de una estrella regular. -->
+    <path id="estrella"
+          d="M0-1 .2246-.3091 .9511-.309 .3633.118 .5878.809 0 .382 -.5878.809
+             -.3633.118 -.9511-.309 -.2246-.3091Z"/>
+
+    <clipPath id="interior">
+      <path d="M195 276H885v410c0 38-15 64-46 88L540 990 241 774c-31-24-46-50-46-88Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- ── estrellas ─────────────────────────────────────────────────────── -->
+  <g fill="url(#oro)">
+    <use href="#estrella" transform="translate(305 134) scale(80)"/>
+    <use href="#estrella" transform="translate(540 96) scale(92)"/>
+    <use href="#estrella" transform="translate(775 134) scale(80)"/>
+  </g>
+
+  <!-- ── blasón: borde negro, filete blanco ────────────────────────────── -->
+  <path d="M163 244h754v442c0 54-19 88-54 116L540 1046 217 802c-35-28-54-62-54-116Z"
+        fill="#111"/>
+  <path d="M179 260h722v426c0 46-17 76-50 102L540 1018 229 788c-33-26-50-56-50-102Z"
+        fill="#fff"/>
+
+  <g clip-path="url(#interior)">
+    <!-- ── banda superior ──────────────────────────────────────────────── -->
+    <rect x="195" y="276" width="690" height="208" fill="#111"/>
+    <rect x="214" y="292" width="652" height="154" fill="none" stroke="#fff" stroke-width="15"/>
+
+    <!-- TRAP. Cuatro letras de 96 de ancho con 46 de aire, centradas en 540:
+         4×96 + 3×46 = 522, así que arrancan en 279 y cierran en 801 — con
+         margen contra el filete del marco, que cierra en 221 y 859.
+
+         El trazo es de 24 y la altura de 108. Los ojos de la R y de la P son el
+         hueco de 20 entre el travesaño de arriba (que baja hasta 340) y el del
+         medio (que arranca en 360): con menos, a tamaño de favicon las dos
+         letras se cierran y la P se lee como una "⅃". -->
+    <g fill="#fff">
+      <!-- T -->
+      <rect x="279" y="316" width="96" height="24"/>
+      <rect x="315" y="340" width="24" height="84"/>
+      <!-- R -->
+      <rect x="421" y="316" width="24" height="108"/>
+      <rect x="421" y="316" width="96" height="24"/>
+      <rect x="493" y="316" width="24" height="44"/>
+      <rect x="421" y="360" width="96" height="24"/>
+      <polygon points="466,384 490,384 517,424 493,424"/>
+      <!-- A -->
+      <polygon points="563,424 587,424 623,316 599,316"/>
+      <polygon points="635,424 659,424 623,316 599,316"/>
+      <rect x="583" y="378" width="56" height="22"/>
+      <!-- P -->
+      <rect x="705" y="316" width="24" height="108"/>
+      <rect x="705" y="316" width="96" height="24"/>
+      <rect x="777" y="316" width="24" height="44"/>
+      <rect x="705" y="360" width="96" height="24"/>
+    </g>
+
+    <!-- ── cuadrante violeta con la cruz ───────────────────────────────── -->
+    <rect x="195" y="524" width="283" height="480" fill="#6f21a8"/>
+    <rect x="315" y="524" width="44" height="480" fill="#111"/>
+    <rect x="195" y="690" width="283" height="44" fill="#111"/>
+
+    <!-- ── los cinco bastones ──────────────────────────────────────────── -->
+    <g fill="#111">
+      <rect x="600" y="538" width="34" height="470"/>
+      <rect x="660" y="538" width="34" height="470"/>
+      <rect x="720" y="538" width="34" height="470"/>
+      <rect x="780" y="538" width="34" height="470"/>
+      <rect x="840" y="538" width="34" height="470"/>
+    </g>
+  </g>
+</svg>
