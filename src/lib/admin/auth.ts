@@ -1,8 +1,6 @@
-import { getAuth } from "firebase-admin/auth";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { adminApp } from "@/lib/firebase/admin";
+import { verificarSesion } from "@/lib/auth/sesion";
 
 /** La autenticación del módulo privado.
  *
@@ -22,14 +20,12 @@ import { adminApp } from "@/lib/firebase/admin";
  *  sale mal configurado a producción.
  */
 
-/** La cookie de sesión. Se llama `__session` y no es capricho: Firebase Hosting
- *  descarta cualquier otra cookie en las respuestas cacheables. */
-export const ADMIN_SESSION_COOKIE = "__session";
-
-/** Cuánto dura la sesión del panel. Cinco días es el máximo que acepta
- *  `createSessionCookie`; para moderación esporádica, tener que volver a entrar
- *  cada semana es aceptable y acota la ventana de una cookie robada. */
-export const ADMIN_SESSION_MAX_AGE = 5 * 24 * 60 * 60; // segundos
+/*  La cookie ya no se define acá. Vive en `lib/auth/sesion.ts` porque es **una
+ *  sola para toda la app**: Firebase Hosting descarta cualquier cookie que no se
+ *  llame `__session` en las respuestas cacheables, así que no existe la opción
+ *  de tener una para el feed y otra para el panel.
+ *
+ *  Lo que este módulo aporta encima de esa sesión compartida es el claim. */
 
 export interface AdminSession {
   uid: string;
@@ -42,32 +38,24 @@ export interface AdminSession {
  *  La usa el layout, que también envuelve a `/admin/login`: si redirigiera
  *  desde ahí, el login se redirigiría a sí mismo para siempre.
  *
- *  `verifySessionCookie(..., true)` comprueba además que la sesión no haya sido
- *  revocada, lo que cuesta una llamada a Firebase por request. Es el precio de
- *  poder echar a alguien de verdad: sin ese `true`, revocarle el acceso a una
- *  cuenta no tiene efecto hasta que la cookie expire, cinco días después.
+ *  La verificación de la cookie —incluido el chequeo de revocación, que cuesta
+ *  una llamada a Firebase por request— la hace `verificarSesion()`, que es la
+ *  misma que usa el módulo público. Acá encima va lo único que este módulo
+ *  agrega: el claim.
  */
 export async function getAdminSession(): Promise<AdminSession | null> {
-  const session = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value;
-  if (!session) return null;
+  const decoded = await verificarSesion();
+  if (!decoded) return null;
 
-  try {
-    const decoded = await getAuth(adminApp()).verifySessionCookie(session, true);
+  // La cookie es válida, pero eso sólo prueba quién es, no que pueda entrar.
+  // Es el mismo `__session` que lleva cualquier persona con sesión en el feed.
+  if (decoded.admin !== true) return null;
 
-    // La cookie es válida pero eso sólo prueba quién es, no que pueda entrar.
-    if (decoded.admin !== true) return null;
-
-    return {
-      uid: decoded.uid,
-      email: decoded.email ?? "",
-      name: decoded.name ?? decoded.email ?? "Administración",
-    };
-  } catch {
-    // Cookie vencida, revocada o falsificada. Las tres son lo mismo desde acá:
-    // no hay sesión. El detalle no se registra ni se muestra — sólo le sirve a
-    // quien esté probando cookies.
-    return null;
-  }
+  return {
+    uid: decoded.uid,
+    email: decoded.email ?? "",
+    name: decoded.name ?? decoded.email ?? "Administración",
+  };
 }
 
 /** Igual que `getAdminSession`, pero corta la request si no hay sesión.

@@ -1,26 +1,24 @@
-import { getAuth } from "firebase-admin/auth";
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { ADMIN_SESSION_COOKIE, ADMIN_SESSION_MAX_AGE } from "@/lib/admin/auth";
-import { adminApp } from "@/lib/firebase/admin";
+import { cerrarSesion, crearSesion, SinPermisoError } from "@/lib/auth/sesion";
 
-/** Canje de un idToken de Firebase por la cookie de sesión del panel.
+/** Canje de un idToken de Firebase por la cookie de sesión, exigiendo el panel.
  *
- *  Existe porque el token que tiene el navegador dura una hora y vive en
- *  JavaScript, y el servidor necesita algo que pueda leer en cada request y que
- *  el JavaScript de la página no pueda tocar. Eso es esta cookie: `httpOnly`,
- *  `sameSite: strict` y firmada por Firebase.
+ *  Es `/api/session` más una condición: la cuenta tiene que traer el custom
+ *  claim `admin`. Todo lo demás —verificar el token, emitir la cookie firmada,
+ *  revocar al salir— vive en `lib/auth/sesion.ts` y es exactamente el mismo
+ *  código, porque la cookie **es la misma**: Firebase Hosting sólo deja pasar
+ *  `__session`, así que no hay una para el feed y otra para el panel.
  *
- *  **Acá se decide quién es admin.** Es el único lugar donde se mira el custom
- *  claim antes de emitir credenciales, así que el orden importa: primero se
- *  verifica el token, después el claim, y sólo entonces se crea la cookie. Sin
- *  ese chequeo, cualquier persona registrada en la app pediría una cookie de
- *  admin con su propio token y entraría al panel.
+ *  Entonces, ¿para qué existe esta ruta si la cookie es la misma? Para que la
+ *  pantalla de login pueda decir "esa cuenta no tiene acceso" en el momento, en
+ *  vez de dejar entrar y rebotar contra `requireAdmin()` una pantalla después.
+ *  El corte de verdad sigue estando en la lectura: quien tenga una cookie sin
+ *  el claim entra al proxy y muere ahí.
  */
 
-/*  `firebase-admin` no corre en el runtime edge. Explícito y no por defecto:
- *  si alguien mueve esta ruta a edge, tiene que ver por qué no puede. */
+/*  `firebase-admin` no corre en el runtime edge. Explícito y no por defecto: si
+ *  alguien mueve esta ruta a edge, tiene que ver por qué no puede. */
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
@@ -35,65 +33,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Falta el token." }, { status: 400 });
   }
 
-  const auth = getAuth(adminApp());
-
   try {
-    // `true`: rechaza el token si la cuenta fue deshabilitada o su sesión
-    // revocada desde que se emitió.
-    const decoded = await auth.verifyIdToken(idToken, true);
-
-    if (decoded.admin !== true) {
-      // Deliberadamente igual que "no sos vos": quien no es admin no tiene por
-      // qué enterarse de si el panel existe ni de qué le falta para entrar.
-      return NextResponse.json(
-        { error: "Esa cuenta no tiene acceso al panel." },
-        { status: 403 },
-      );
-    }
-
-    const sessionCookie = await auth.createSessionCookie(idToken, {
-      expiresIn: ADMIN_SESSION_MAX_AGE * 1000,
-    });
-
-    (await cookies()).set(ADMIN_SESSION_COOKIE, sessionCookie, {
-      httpOnly: true,
-      // El JavaScript de la página nunca la lee; en producción sólo viaja por
-      // HTTPS. En dev queda sin `secure` porque si no el navegador la descarta
-      // en `http://localhost` y no se puede probar el flujo.
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-      maxAge: ADMIN_SESSION_MAX_AGE,
-    });
-
+    await crearSesion(idToken, { exigirAdmin: true });
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (err) {
+    if (err instanceof SinPermisoError) {
+      // Deliberadamente parco: quien no es admin no tiene por qué enterarse de
+      // qué le falta para entrar.
+      return NextResponse.json({ error: err.message }, { status: 403 });
+    }
     return NextResponse.json({ error: "No pudimos validar tu sesión." }, { status: 401 });
   }
 }
 
 /** Cerrar sesión del panel.
  *
- *  Borra la cookie **y** revoca los refresh tokens de la cuenta. Lo segundo es
- *  lo que hace que salir signifique algo: sin eso, una copia de la cookie
- *  robada antes de salir seguiría sirviendo hasta que expire, y el
- *  `verifySessionCookie(..., true)` de `requireAdmin` no tendría nada que
- *  detectar.
+ *  Idéntico a `DELETE /api/session` —borra la cookie y revoca los refresh
+ *  tokens— y se mantiene separado sólo para que `SalirDelPanel` no tenga que
+ *  saber del módulo público.
  */
 export async function DELETE() {
-  const jar = await cookies();
-  const session = jar.get(ADMIN_SESSION_COOKIE)?.value;
-
-  if (session) {
-    try {
-      const auth = getAuth(adminApp());
-      const decoded = await auth.verifySessionCookie(session);
-      await auth.revokeRefreshTokens(decoded.sub);
-    } catch {
-      // La cookie ya no valía. Igual hay que borrarla del navegador.
-    }
-  }
-
-  jar.delete(ADMIN_SESSION_COOKIE);
+  await cerrarSesion();
   return NextResponse.json({ ok: true });
 }

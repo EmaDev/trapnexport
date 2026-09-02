@@ -100,7 +100,16 @@ export function PerfilClient({
   const cerrarSesion = async () => {
     setSaliendo(true);
     try {
+      // Las DOS sesiones, y en este orden. La cookie del servidor primero y
+      // esperada: `AuthProvider` también la borra al ver que ya no hay usuario,
+      // pero ese camino es una promesa suelta que puede no haber terminado
+      // cuando `replace` pide la pantalla nueva — y esa pantalla la arma el
+      // servidor leyendo la cookie. Hacerlo acá vuelve el orden determinista.
+      await fetch("/api/session", { method: "DELETE" }).catch(() => {});
       await signOut(auth);
+      // El feed es un Server Component que ahora depende de la sesión: sin esto
+      // Next serviría la copia que renderizó cuando todavía había cookie.
+      router.refresh();
       router.replace("/");
     } catch {
       setSaliendo(false);
