@@ -173,23 +173,49 @@ un voto por cuenta es que el segundo caiga sobre el mismo documento que el
 primero. De paso, votar dos veces lo mismo dejó de hacer nada, y cambiar de
 opción resta de la opción vieja aunque hayas recargado.
 
-### Fase 2 — Identidad única sobre el uid
+### Fase 2 — Identidad única sobre el uid · **hecha**
 
-- `authorOf()` en `queries.ts` deja de mirar `db.users` y lee
-  `trapnexport-user`. Con caché por request: el feed pide el autor de cada post
-  y sin agrupar son N lecturas por render.
-- Los ids de dominio pasan de slug a uid: `Post.authorId`, `CommentRow.authorId`,
-  `likedBy`, `savedBy`, `participantIds`.
-- **El plantel no se pierde**: `UserDoc.playerId` ya es el puente entre la
-  cuenta y `trapnexport-jugador`. La cuenta es de la persona, la ficha del
-  plantel es del club, y son cosas distintas — eso ya está bien modelado.
-- `getProfile(handle)` pasa a ser una query por `handle` (índice nuevo) en vez
-  de un `find` en un array.
-- Se borran `db.users` y `db.currentUserId`. `PerfilClient.tsx` deja de
-  importar `db` — es el único componente que hoy lo hace.
+- **`lib/social/directorio.ts`** es lo que reemplaza a `db.users`: lee
+  `trapnexport-user` y devuelve `Cuenta`, con el uid de id. Trae la colección
+  entera y no cuenta por cuenta, porque el feed pide el autor de cada
+  publicación, de cada comentario y de los tres primeros likes: de a uno son
+  decenas de lecturas por render, casi todas repetidas. Va envuelto en `cache()`
+  de React, que memoiza **por request**, así una pantalla que llama a `getFeed`,
+  `getSession` y `getNotifications` lee las cuentas una vez y no tres. El techo
+  queda escrito en el archivo: con cientos de cuentas esto pasa a ser un
+  `getAll()` de los uid de la pantalla, y no cambia ninguna firma.
+- **Sin índice nuevo.** El plan decía que `getProfile(handle)` iba a ser una
+  query por `handle`; como el directorio ya trae todo, se indexa en memoria y no
+  hace falta ni la query ni el índice.
+- Los ids de dominio pasan de slug a uid: `authorId`, `likedBy`, `savedBy`,
+  `fromId`, `participantIds`. No hubo que migrar datos: el store arrancaba vacío.
+- **El plantel no se pierde**: `profile.playerId` es el puente. `perfil/page.tsx`
+  emparejaba `profile.id` contra `JUGADORES` y `getPlayer()`, y eso se rompía —
+  ahora `profile.id` es un uid y esas dos se indexan por el slug del jugador.
+- Se borraron `db.users` y `db.currentUserId`. También los tipos `User` y
+  `TeamClaim` de `social/types.ts`, que quedaron huérfanos y eran una trampa:
+  dos tipos casi iguales con el campo `id` significando cosas distintas.
+- El carrete pasó a `db.gallery`, un mapa por uid, porque ya no hay objeto
+  usuario donde colgarlo. Es transitorio: se va a Storage en la Fase 4.
 
-Al terminar esta fase el store en memoria queda con `posts`, `comments` y
-`conversations` nada más.
+**Lo que apareció al hacerlo.** La sesión pasó a ser opcional de punta a punta
+(`SessionVM | null`), y eso es correcto: el feed, un perfil y una publicación se
+ven sin cuenta porque están hechos para compartirse por link. Lo que cambia es
+que no se dibujan los controles que escriben — el compositor no aparece, el FAB
+del foro manda a `/login` y la caja de comentarios también.
+
+Y aparecieron tres cortes que antes no podían existir, porque con todos
+escribiendo como la misma cuenta semilla no había nada que separar:
+
+- `deleteComment` ahora exige ser el autor. Sin eso, cualquiera borraba el
+  comentario de cualquiera con un POST.
+- `getConversation` y `sendMessage` exigen ser participante. Sin eso, cualquiera
+  con el id leía y escribía en la conversación de otros dos.
+- `/perfil` corta en el servidor. Antes el gate era de cliente y no podía ser
+  otra cosa: los datos viajaban igual aunque no se dibujaran.
+
+Al terminar esta fase el store en memoria queda con `posts`, `comments`,
+`conversations` y el carrete.
 
 ### Fase 3 — Publicaciones y comentarios
 
