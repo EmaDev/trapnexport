@@ -86,7 +86,7 @@ function CategoriaVotacion({
 }: {
   categoria: Categoria;
   voto: string[] | null;
-  onVotar: (ids: string[]) => void;
+  onVotar: (ids: string[]) => void | Promise<void>;
 }) {
   if (categoria.proximamente) {
     return (
@@ -144,11 +144,16 @@ function CategoriaFila({
   voto,
   defaultOpen,
   onVotar,
+  intento,
 }: {
   categoria: Categoria;
   voto: string[] | null;
   defaultOpen: boolean;
-  onVotar: (ids: string[]) => void;
+  onVotar: (ids: string[]) => void | Promise<void>;
+  /** Sube de a uno cada vez que el servidor rechaza un voto de esta categoría.
+   *  Va de `key` en el `<Poll>`: un voto bloqueado —sin sesión, votación
+   *  cerrada— lo remonta y le borra el "Votado" que se pinta solo. */
+  intento: number;
 }) {
   const [open, setOpen] = useState(defaultOpen);
 
@@ -193,7 +198,12 @@ function CategoriaFila({
       >
         <div className="overflow-hidden">
           <div className="border-t border-border p-3">
-            <CategoriaVotacion categoria={categoria} voto={voto} onVotar={onVotar} />
+            <CategoriaVotacion
+              key={intento}
+              categoria={categoria}
+              voto={voto}
+              onVotar={onVotar}
+            />
           </div>
         </div>
       </div>
@@ -212,13 +222,21 @@ export function FeedTabs({
 }) {
   const { snack } = useSnackbar();
   const router = useRouter();
-  const { account } = useAuth();
+  const { user, account } = useAuth();
   const [tab, setTab] = useState<string>("encuesta");
 
   // Qué votó cada uno en esta sesión. Se manda el voto anterior a `votarEncuesta`
-  // para que cambiar de opción reste de la vieja; recargar lo olvida (no hay uid
-  // sin Firebase Auth). Los conteos no se guardan acá: no se muestran.
+  // para que cambiar de opción reste de la vieja; recargar lo olvida. Los conteos
+  // no se guardan acá: no se muestran.
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
+
+  // Contador de rechazos por encuesta. `vote` lo sube cuando el servidor no toma
+  // el voto (sin sesión, votación cerrada); `CategoriaFila` lo usa de `key` para
+  // remontar el `<Poll>`, que marca "Votado" en su estado interno apenas se
+  // hace clic —antes de saber si entró— y no se revierte solo.
+  const [rechazos, setRechazos] = useState<Record<string, number>>({});
+  const rechazar = (encuestaId: string) =>
+    setRechazos((prev) => ({ ...prev, [encuestaId]: (prev[encuestaId] ?? 0) + 1 }));
 
   const categorias: Categoria[] = useMemo(
     () =>
@@ -239,8 +257,11 @@ export function FeedTabs({
   const pending = total - answered;
 
   const vote = async (encuestaId: string, ids: string[]) => {
-    // Se ve el feed sin sesión, pero votar no.
-    if (!account) {
+    // Se ve el feed sin sesión, pero votar no. El chequeo también está en la
+    // Server Action —es un endpoint POST y no alcanza con esconder el botón—;
+    // acá se corta antes para no pegarle al servidor y para mostrar el "Ingresar".
+    if (!account || !user) {
+      rechazar(encuestaId);
       snack({
         message: "Necesitás iniciar sesión para votar",
         variant: "neutral",
@@ -249,11 +270,22 @@ export function FeedTabs({
       return;
     }
 
+    // El token de Firebase con el que la Server Action confirma quién vota.
+    let idToken: string;
+    try {
+      idToken = await user.getIdToken();
+    } catch {
+      rechazar(encuestaId);
+      snack({ message: "No pudimos validar tu sesión. Volvé a iniciar sesión.", variant: "error" });
+      return;
+    }
+
     const previos = answers[encuestaId] ?? [];
     setAnswers((prev) => ({ ...prev, [encuestaId]: ids }));
 
-    const r = await votarEncuesta(encuestaId, ids, previos);
+    const r = await votarEncuesta(encuestaId, ids, previos, idToken);
     if (!r.ok) {
+      rechazar(encuestaId);
       // Revertir al voto que había antes: si no, la tarjeta muestra "Votado"
       // sobre algo que el servidor no registró.
       setAnswers((prev) => {
@@ -337,7 +369,8 @@ export function FeedTabs({
                         categoria={categoria}
                         voto={answers[categoria.id] ?? null}
                         defaultOpen={i === 0}
-                        onVotar={(ids) => void vote(categoria.id, ids)}
+                        intento={rechazos[categoria.id] ?? 0}
+                        onVotar={(ids) => vote(categoria.id, ids)}
                       />
                     </li>
                   ))}

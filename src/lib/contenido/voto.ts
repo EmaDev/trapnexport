@@ -1,8 +1,9 @@
 "use server";
 
+import { getAuth } from "firebase-admin/auth";
 import { revalidatePath } from "next/cache";
 
-import { adminDb } from "@/lib/firebase/admin";
+import { adminApp, adminDb } from "@/lib/firebase/admin";
 import { COL } from "@/lib/firebase/collections";
 import type { EncuestaDoc } from "@/lib/firebase/schema";
 
@@ -13,11 +14,16 @@ import type { EncuestaDoc } from "@/lib/firebase/schema";
  *  feed, no el panel. Escribe igual con el Admin SDK —`firestore.rules` tiene la
  *  colección cerrada al cliente— pero sin exigir sesión de admin.
  *
- *  No hay dedupe por persona: mientras el feed no tenga Firebase Auth, no hay un
- *  uid en el que anclarlo. El cliente recuerda su voto en la sesión y manda el
- *  anterior en `previos` para que cambiar el voto reste de la opción vieja; un
- *  recargar y volver a votar sí suma de más. Los resultados no se muestran hasta
- *  la gala, así que el ruido no se ve, pero es una limitación real.
+ *  Lo que **sí** exige es sesión: una Server Action es un endpoint POST y sin
+ *  este chequeo se la puede invocar sin pasar por el feed —ni por el snackbar de
+ *  "iniciá sesión"— y el voto entra igual. El cliente manda el `idToken` de
+ *  Firebase Auth y acá se verifica con el Admin SDK; si no valida, no se escribe.
+ *
+ *  No hay dedupe por persona todavía: el cliente recuerda su voto en la sesión y
+ *  manda el anterior en `previos` para que cambiar el voto reste de la opción
+ *  vieja; un recargar y volver a votar sí suma de más. Los resultados no se
+ *  muestran hasta la gala, así que el ruido no se ve, pero es una limitación
+ *  real —ahora que hay un `uid` en el token, se puede anclar; es el próximo paso.
  */
 
 export type ResultadoVoto = { ok: true } | { ok: false; error: string };
@@ -26,7 +32,19 @@ export async function votarEncuesta(
   encuestaId: string,
   opciones: string[],
   previos: string[] = [],
+  idToken?: string,
 ): Promise<ResultadoVoto> {
+  if (!idToken) {
+    return { ok: false, error: "Necesitás iniciar sesión para votar." };
+  }
+  try {
+    await getAuth(adminApp()).verifyIdToken(idToken, true);
+  } catch {
+    // Token vencido, revocado o falsificado: desde acá los tres son lo mismo,
+    // no hay sesión válida.
+    return { ok: false, error: "Necesitás iniciar sesión para votar." };
+  }
+
   const ref = adminDb().collection(COL.encuesta).doc(encuestaId);
 
   try {
