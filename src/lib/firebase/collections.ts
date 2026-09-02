@@ -57,11 +57,42 @@ export const COL = {
    *  Ver `CommentDoc`. */
   comment: `${PREFIX}-comment`,
 
+  /* ── el chat (`lib/chat/`) ──────────────────────────────────────────────── */
+  /** conversaciones: directas de a dos y grupos. Ver `ConversacionDoc`. */
+  conversacion: `${PREFIX}-conversacion`,
+  /** el registro de lo que se mandó por difusión desde el panel. No es el
+   *  mecanismo de envío —eso son conversaciones y mensajes normales— sino la
+   *  auditoría: qué se comunicó, a quiénes y quién lo mandó. Ver `DifusionDoc`. */
+  difusion: `${PREFIX}-difusion`,
+
   /** avisos de campanita: un documento por destinatario. Los escribe el
    *  servidor (`lib/social/notify.ts`) y los lee `social/queries.ts`. Ver
    *  `NotificacionDoc`. */
   notificacion: `${PREFIX}-notification`,
 } as const;
+
+/** La subcolección de mensajes: `trapnexport-conversacion/{id}/mensaje/{id}`.
+ *
+ *  Subcolección y no un array dentro de la conversación: una conversación activa
+ *  supera el tope de 1 MB del documento, y hasta que lo supera se relee entera
+ *  cada vez que la bandeja lista las conversaciones. */
+export const SUB_MENSAJE = "mensaje";
+
+/** El uid de la cuenta oficial del club.
+ *
+ *  Es un id fijo y **no** un uid de Firebase Auth, a propósito: no existe
+ *  ninguna credencial con la que iniciar sesión como el club, así que nadie
+ *  puede suplantarlo ni siquiera con las reglas de su lado. El documento lo crea
+ *  el seed con el Admin SDK, que se saltea `validNewUser`.
+ *
+ *  Es el remitente de las difusiones del panel. Que sea el club y no la cuenta
+ *  personal de quien aprieta enviar tiene dos motivos: un aviso institucional no
+ *  debería llegar como "Emanuel te escribió", y el día que administre otra
+ *  persona el hilo quedaría partido entre dos remitentes.
+ *
+ *  Hay que excluirlo a mano de donde se listan cuentas —el buscador,
+ *  `notifyAll`, `/admin/usuarios`—: es un remitente, no un usuario. */
+export const CLUB_UID = "club";
 
 /** El único documento dentro de `trapnexport-config`.
  *

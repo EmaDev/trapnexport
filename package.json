@@ -11,6 +11,7 @@
     "vapid": "node scripts/generate-vapid-keys.mjs",
     "seed:jugadores": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-jugadores.mjs",
     "seed:contenido": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-contenido.mjs",
+    "seed:club": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-club.mjs",
     "seed:notificaciones": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-notificaciones.mjs",
     "admin:grant": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/grant-admin.mjs"
   },

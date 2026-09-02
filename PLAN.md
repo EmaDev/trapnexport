@@ -1,26 +1,30 @@
 # Plan de migración
 
-Este documento reemplaza a la sección *Qué falta* del [README](README.md), que
-quedó vieja: de sus cinco puntos, tres ya están hechos y el que falta está mal
-descripto. Acá está lo que queda, en el orden en que se puede hacer y con el
-porqué de cada decisión.
+Este documento reemplaza a la sección *Qué falta* del [README](README.md). Está
+escrito en presente de cuando se planificó, y cada fase lleva al final cómo
+quedó: lo que salió distinto de lo previsto es la parte que vale la pena leer.
 
-## El estado real
+## Estado
 
-Lo que el README todavía lista como pendiente y **ya está**:
+**Hechas las fases 0 a 5 y la 7. Queda sólo la 6 (push).**
 
-| Punto del README | Dónde está hoy |
-|---|---|
-| Auth real (Firebase) en `/` y `/admin` | `lib/auth/*`, `lib/admin/auth.ts` — el `TODO(firebase)` no existe más; el flag `ADMIN_AUTH_ENABLED` se eliminó a propósito |
-| Persistencia (Firestore) | El contenido del panel (noticias, encuestas, invitaciones, eventos, config) y las notificaciones ya son documentos |
-| Subida de imágenes | `lib/storage/post-image.ts` sube al bucket y manda sólo la `downloadURL` |
+Ya no hay store en memoria ni identidad falsa: todo el dominio está en Firestore
+y cada escritura la firma quien tiene la sesión. Lo que sigue abajo es el
+registro de cómo se llegó ahí.
 
-Lo que queda es, en una línea: **el módulo social sigue en el store en memoria y
-sobre una identidad falsa**.
+Lo único pendiente es push: hay claves VAPID en el entorno, `web-push` en
+`package.json` y `PushSubscriptionDoc` escrito en el schema, y **cero líneas de
+código** — `public/sw.js` no tiene handler de `push`.
+
+Y algo que ninguna fase cubre: **nada de esto se probó en un navegador.**
+`tsc`, ESLint y `next build` pasan, pero el comportamiento real —entrar, ver el
+feed propio, publicar, chatear, recibir una difusión— está sin verificar.
 
 ## La decisión de fondo: una sola identidad
 
-Hoy hay dos modelos de usuario en paralelo, y no se hablan:
+*(Escrito antes de empezar. Ya no es así: se resolvió en la Fase 2.)*
+
+Había dos modelos de usuario en paralelo, y no se hablaban:
 
 ```
 trapnexport-user/{uid}          ← Firestore. id = uid de Firebase Auth.
@@ -116,6 +120,8 @@ Fase 1  sesión ──┼─→ Fase 2  identidad ─┬─→ Fase 3  posts/com
                  │                       ├─→ Fase 4  storage ──────────┼─→ Fase 7  cierre
                  │                       ├─→ Fase 5  chat ─────────────┤
                  └───────────────────────┴─→ Fase 6  push ─────────────┘
+
+Hechas: 0, 1, 2, 3, 4, 5 y 7. Queda la 6 (push), que no depende de ninguna.
 ```
 
 ---
@@ -353,6 +359,9 @@ Cinco decisiones que vale la pena dejar escritas:
 
 Índice nuevo: `participantIds array-contains` + `updatedAt desc`.
 
+**Estado: hecha.** Lo que salió distinto de lo planeado está anotado al final de
+esta sección.
+
 #### 5.1 — Directas, tiempo real y lecturas
 
 Reemplaza el chat actual sin agregar funciones todavía.
@@ -417,6 +426,47 @@ Reemplaza el chat actual sin agregar funciones todavía.
 con la Fase 6 ese mismo punto dispara el push. Una difusión a todo el plantel
 son, entonces, N mensajes + N notificaciones + N pushes: todo por lotes.
 
+#### Cómo quedó
+
+El módulo entero vive en `lib/chat/` —`queries.ts`, `actions.ts` y `vivo.ts`—
+en vez de dentro de `social/`: tres tipos de conversación con lecturas por
+persona y tiempo real no entraban como un apartado de un archivo que ya tenía el
+feed.
+
+Lo que salió distinto de lo escrito arriba:
+
+- **El FAB hace las dos cosas.** El plan preveía un "nuevo grupo" aparte. Quedó
+  uno solo: se eligen personas de una lista y con una es una directa, con dos o
+  más es un grupo. Dos botones separados obligaban a decidir *antes* de saber a
+  quién se quería escribir, que es al revés de como se piensa.
+- **`getUnreadChats` devuelve conversaciones con algo sin leer, no mensajes.**
+  Saber *si* hay algo nuevo sale de comparar `lastReadAt` contra
+  `ultimoMensaje.at`, sin leer un solo mensaje; el número exacto costaría una
+  query por conversación y la bandeja dibuja un punto, no una cifra.
+- **`marcarLeida` se dispara también con cada mensaje nuevo**, no sólo al abrir.
+  Marcando sólo al entrar, un mensaje que llega con la pantalla abierta quedaba
+  contando como no leído para siempre.
+- **La cuenta del club lleva rol propio** (`role: "club"`) y un seed nuevo
+  (`npm run seed:club`). No es un permiso —`/admin` se sigue gateando por el
+  claim— sino lo que permite excluirla de donde se listan cuentas: el buscador,
+  `notifyAll` y `/admin/usuarios`. Su handle se reserva en `trapnexport-handle`
+  como cualquier otro, o alguien podría registrarse como @trapnexport y hacerse
+  pasar por el club en el feed.
+- **El compositor arranca en "sólo el plantel", no en "todos".** El riesgo que el
+  plan anotaba —N conversaciones que alguien tiene que atender— se acota mejor
+  con un default prudente que con una advertencia.
+- **La respuesta del panel se abre en la misma fila** y no en un modal: el
+  contexto de la conversación es la línea de arriba, y taparla obliga a
+  recordarla.
+
+Y una decisión de costo que quedó tomada a conciencia: la regla de
+`mensaje/{id}` hace un `get()` de la conversación padre para saber si sos
+participante, y **cada `get()` en rules se factura como una lectura**. En un chat
+en vivo es una lectura extra por mensaje. La alternativa es duplicar
+`participantIds` en cada mensaje, que es un dato repetido que hay que mantener
+sincronizado al sumar o sacar gente de un grupo. Se deja el `get()`; si el número
+molesta, ese es el arreglo y conviene hacerlo recién ahí.
+
 ### Fase 6 — Push notifications
 
 Es lo más verde de todo: hay claves VAPID en el entorno, `web-push` en
@@ -440,14 +490,23 @@ y [`public/sw.js`](public/sw.js) no tiene handler de `push`.
 - Limpieza: un endpoint que responde `410 Gone` es una instalación desinstalada
   y hay que borrar la suscripción, o la lista crece para siempre.
 
-### Fase 7 — Cierre
+### Fase 7 — Cierre · **hecha**
 
-- Se borra `lib/social/store.ts`.
-- En `firestore.rules` desaparece el comentario del catch-all que dice *"el
-  resto del dominio (publicaciones, comentarios, chat) todavía vive en el store
-  en memoria"*. El `match /{document=**} { allow read, write: if false; }` se
+- **`lib/social/store.ts` ya no existe.** Se vació solo: las cuentas se fueron en
+  la Fase 2, las publicaciones y los comentarios en la 3, el carrete en la 4 y el
+  chat en la 5. Cuando quedó sin nada adentro, borrarlo fue sacar el archivo y
+  dos imports.
+- También se fueron los tipos que lo acompañaban en `social/types.ts` —`User`,
+  `TeamClaim`, `Post`, `CommentRow`, `Message`, `Conversation`—, cada uno
+  reemplazado por su `*Doc` del schema. En su lugar quedó un comentario que dice
+  qué había y por qué se fue: son los tipos que alguien va a buscar.
+- En `firestore.rules` desapareció el comentario del catch-all que hablaba del
+  store en memoria. El `match /{document=**} { allow read, write: if false; }` se
   queda: una colección sin regla explícita no puede quedar abierta por olvido.
-- Un `seed:social` opcional, en la línea de los cuatro seeds que ya existen.
+- El `seed:social` que figuraba como opcional **no se hizo**, y conviene que
+  siga sin hacerse: el feed arranca vacío a propósito y se llena con lo que la
+  gente publica. El seed que sí entró es otro, `seed:club`, y no es contenido de
+  muestra sino una cuenta que la app necesita para funcionar.
 
 ---
 

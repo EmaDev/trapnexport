@@ -48,7 +48,13 @@ export interface FsTimestamp {
  *               verifica `lib/admin/auth.ts`. Un campo de Firestore que otorga
  *               permisos es un campo que hay que defender en las rules.
  */
-export type UserRole = "fan" | "player" | "admin";
+/** `club` es la cuenta oficial (`CLUB_UID`), el remitente de las difusiones del
+ *  panel. No es un permiso —quién entra a `/admin` lo decide el claim `admin`—
+ *  sino lo que permite distinguirla al listar cuentas: es un remitente, no un
+ *  usuario, y no tiene que aparecer en el buscador ni recibir sus propios
+ *  avisos. `firestore.rules` sigue aceptando sólo `fan` y `player` en un alta
+ *  desde el cliente; ésta la crea el seed con el Admin SDK. */
+export type UserRole = "fan" | "player" | "admin" | "club";
 
 /** El estado de la cuenta, en un solo campo.
  *
@@ -422,6 +428,103 @@ export interface CommentDoc {
  *  El documento no necesita más que la fecha: existir ya significa "guardada".
  */
 export interface GuardadoDoc {
+  createdAt: FsTimestamp;
+}
+
+/* ── trapnexport-conversacion/{id} ───────────────────────────────────────── */
+
+export type ConversacionTipo = "directa" | "grupo";
+
+/** El último mensaje, copiado dentro de la conversación.
+ *
+ *  Desnormalizado a propósito: la bandeja muestra la última línea de cada
+ *  conversación, y sin esto listarla sería una query a la subcolección de
+ *  mensajes por cada conversación. Lo escribe `enviarMensaje` en el mismo lote
+ *  que el mensaje. */
+export interface UltimoMensajeDoc {
+  texto: string;
+  autorId: string;
+  at: FsTimestamp;
+}
+
+/** Una conversación: directa de a dos, o grupo. `trapnexport-conversacion/{id}`.
+ *
+ *  **El id de una directa es determinístico**: los dos uid ordenados y unidos
+ *  por `__` (ver `idDirecta` en `lib/chat/queries.ts`). Firestore no tiene
+ *  índices únicos, así que con id al azar dos personas escribiéndose por primera
+ *  vez al mismo tiempo crearían dos conversaciones para el mismo par y los
+ *  mensajes se partirían entre las dos. Es la misma solución que usa
+ *  `trapnexport-handle` para los nombres de usuario.
+ *
+ *  Los grupos sí llevan id al azar: el mismo conjunto de personas puede tener
+ *  dos grupos distintos, y eso es legítimo.
+ */
+export interface ConversacionDoc {
+  tipo: ConversacionTipo;
+  /** uid de los participantes. La bandeja se consulta con
+   *  `where("participantIds", "array-contains", uid)`. */
+  participantIds: string[];
+
+  /* ── sólo en grupos ────────────────────────────────────────────────────── */
+  nombre?: string;
+  avatar?: string;
+  avatarPath?: string;
+  /** uid de quien lo creó */
+  creadoPor?: string;
+
+  /* ── denormalizado para la bandeja ─────────────────────────────────────── */
+  ultimoMensaje?: UltimoMensajeDoc;
+
+  /** hasta cuándo leyó cada participante, por uid.
+   *
+   *  Mapa dentro del documento y no subcolección: el "no leído" sale de comparar
+   *  contra `ultimoMensaje.at`, sin leer un solo mensaje. Con el plantel entero
+   *  son decenas de entradas, muy lejos del tope de 1 MB.
+   *
+   *  La contra es que cualquier participante puede escribir el mapa completo,
+   *  así que `firestore.rules` exige que un update sólo toque **su propia
+   *  clave**. */
+  lastReadAt: Record<string, FsTimestamp>;
+
+  createdAt: FsTimestamp;
+  /** se mueve con cada mensaje: es el orden de la bandeja */
+  updatedAt: FsTimestamp;
+}
+
+/* ── trapnexport-conversacion/{id}/mensaje/{id} ──────────────────────────── */
+
+/** `"sistema"` es "Fulano agregó a Mengano": lo escribe el servidor, no tiene
+ *  autor que mostrar y se dibuja centrado en vez de en una burbuja. Sin un tipo,
+ *  esos avisos habría que fabricarlos en la UI a partir de nada. */
+export type MensajeTipo = "texto" | "sistema";
+
+export interface MensajeDoc {
+  /** uid de quien escribió. En los de sistema es el uid de quien hizo la acción. */
+  autorId: string;
+  texto: string;
+  tipo: MensajeTipo;
+  at: FsTimestamp;
+}
+
+/* ── trapnexport-difusion/{id} ───────────────────────────────────────────── */
+
+export type DifusionAlcance = "todos" | "plantel" | "seleccion";
+
+/** El registro de una difusión del panel.
+ *
+ *  **No es el mecanismo de envío.** Una difusión se manda como conversaciones
+ *  directas normales entre el club y cada destinatario — por eso cada uno puede
+ *  contestar en privado sin ver a los demás. Este documento es la auditoría: sin
+ *  él no hay forma de saber qué se comunicó ni a quiénes.
+ */
+export interface DifusionDoc {
+  texto: string;
+  alcance: DifusionAlcance;
+  /** los uid a los que efectivamente se les escribió, ya resueltos */
+  destinatarios: string[];
+  /** uid del admin que apretó enviar. El remitente que ve la gente es el club
+   *  (`CLUB_UID`); esto es para saber quién fue. */
+  enviadoPor: string;
   createdAt: FsTimestamp;
 }
 

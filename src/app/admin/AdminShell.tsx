@@ -5,6 +5,7 @@ import { SideBar, SnackbarProvider, Navbar, type SidebarSection } from "lib-kit-
 
 import {
   CalendarIcon,
+  ChatIcon,
   DashboardIcon,
   NewsIcon,
   PollIcon,
@@ -29,10 +30,10 @@ import { SalirDelPanel } from "./SalirDelPanel";
  *  Son dos apps que comparten dominio y datos, no una app con dos secciones.
  */
 
-/** Tres grupos, y el orden es el del trabajo del día: primero el panel, después
- *  lo que se **carga** (contenido) y al final lo que se **revisa**
- *  (moderación). El panel viejo tenía moderación arriba porque era lo único que
- *  había. */
+/** El orden es el del trabajo del día: primero el panel, después lo que se
+ *  **carga** (contenido), lo que se usa **en vivo**, lo que se **manda**
+ *  (comunicación) y al final lo que se **revisa** (moderación). El panel viejo
+ *  tenía moderación arriba porque era lo único que había. */
 const SECTIONS: SidebarSection[] = [
   {
     title: "General",
@@ -60,6 +61,13 @@ const SECTIONS: SidebarSection[] = [
     links: [
       { label: "Presentación", href: "/admin/presentacion", icon: <PresentIcon /> },
     ],
+  },
+  // Tampoco es "Contenido": lo de arriba se publica para que alguien lo
+  // encuentre, esto se le manda a cada persona a su bandeja y admite respuesta.
+  // El grupo propio es lo que recuerda que hay algo que atender del otro lado.
+  {
+    title: "Comunicación",
+    links: [{ label: "Mensajes", href: "/admin/mensajes", icon: <ChatIcon /> }],
   },
   {
     title: "Moderación",

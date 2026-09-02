@@ -1,7 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 
 import { adminDb } from "@/lib/firebase/admin";
-import { COL } from "@/lib/firebase/collections";
+import { CLUB_UID, COL } from "@/lib/firebase/collections";
 import type { NotificationKind, UserId } from "@/lib/social/types";
 
 /** Alta de notificaciones de campanita — servicio de dominio, no Server Action.
@@ -68,7 +68,11 @@ export async function notifyAll(n: NuevaNotificacion): Promise<void> {
     .where("status", "in", ["active", "pending"])
     .get();
 
-  const ids = destinatarios.docs.map((d) => d.id).filter((id) => id !== n.actorId);
+  // El club queda afuera: es un remitente, no alguien a quien avisarle. Sin
+  // esto, cada publicación del feed le dejaría una campanita que nadie mira.
+  const ids = destinatarios.docs
+    .map((d) => d.id)
+    .filter((id) => id !== n.actorId && id !== CLUB_UID);
   if (!ids.length) return;
 
   for (let i = 0; i < ids.length; i += 450) {

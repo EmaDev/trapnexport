@@ -260,10 +260,63 @@ service cloud.firestore {
     match /trapnexport-post/{id}    { allow read: if true; allow write: if false; }
     match /trapnexport-comment/{id} { allow read: if true; allow write: if false; }
 
+    /* ── el chat ─────────────────────────────────────────────────────────── */
+
+    /*  Conversaciones y mensajes.
+     *
+     *  **Es la única parte del dominio que el navegador lee directo.** Todo lo
+     *  demás pasa por el servidor con el Admin SDK; acá no puede, porque el
+     *  punto es que los mensajes lleguen solos: eso es un `onSnapshot`, y un
+     *  `onSnapshot` lo abre el cliente con su propio token (ver
+     *  `lib/chat/vivo.ts`).
+     *
+     *  Por eso estas dos reglas son la protección real de la privacidad del
+     *  chat, y no una segunda barrera detrás de otra cosa.
+     */
+    match /trapnexport-conversacion/{id} {
+      function participo() {
+        return signedIn() && request.auth.uid in resource.data.participantIds;
+      }
+
+      allow read: if participo();
+
+      /*  La escritura la hace el servidor (`lib/chat/actions.ts`), porque
+       *  ningún envío es un documento solo: mueve el `ultimoMensaje` y el
+       *  `updatedAt` de la conversación y dispara la campanita de cada
+       *  participante.
+       *
+       *  La única excepción es marcar leído, y va acotada a **la propia
+       *  clave**: `lastReadAt` es un mapa con una entrada por participante, así
+       *  que sin este corte cualquiera de ellos podría escribir la de otro y
+       *  dejarle la conversación marcada como leída. */
+      allow update: if participo()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastReadAt'])
+        && request.resource.data.lastReadAt.diff(resource.data.lastReadAt)
+             .affectedKeys().hasOnly([request.auth.uid]);
+
+      allow create, delete: if false;
+
+      /*  Los mensajes se leen si se puede leer la conversación. El `get()` del
+       *  padre cuesta una lectura facturada por operación, que en un chat en
+       *  vivo es una por mensaje: se acepta a propósito, porque la alternativa
+       *  —duplicar `participantIds` en cada mensaje— es un dato repetido que hay
+       *  que mantener sincronizado al sumar o sacar gente de un grupo. Si el
+       *  número molesta, ese es el arreglo y conviene hacerlo recién ahí. */
+      match /mensaje/{mensajeId} {
+        allow read: if signedIn()
+          && request.auth.uid in get(/databases/$(database)/documents/trapnexport-conversacion/$(id)).data.participantIds;
+        allow write: if false;
+      }
+    }
+
+    /*  El registro de difusiones es del panel y nada más: quién recibió qué no
+     *  es asunto de los destinatarios. */
+    match /trapnexport-difusion/{id} { allow read, write: if false; }
+
     /* ── todo lo demás ───────────────────────────────────────────────────── */
 
-    /*  Lo que queda del dominio en memoria es el chat y el carrete del perfil.
-     *  Hasta que migren, cerrado: una colección sin regla explícita no puede
+    /*  Ya no queda dominio en memoria: todo está en Firestore y con regla
+     *  propia. Esto se queda igual — una colección sin regla explícita no puede
      *  quedar abierta por olvido. */
     match /{document=**} {
       allow read, write: if false;

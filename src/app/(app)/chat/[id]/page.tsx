@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
-import { sendMessage } from "@/lib/social/actions";
-import { getConversation } from "@/lib/social/queries";
+import { getCurrentUid } from "@/lib/auth/sesion";
+import { getConversationHead, getMessages } from "@/lib/chat/queries";
 import { ConversationClient } from "./ConversationClient";
 
 export const metadata: Metadata = {
@@ -16,15 +16,17 @@ export default async function ConversationPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const conversation = await getConversation(id);
-  if (!conversation) notFound();
 
-  return (
-    <ConversationClient
-      conversationId={conversation.id}
-      peer={conversation.peer}
-      messages={conversation.messages}
-      onSend={sendMessage}
-    />
-  );
+  const uid = await getCurrentUid();
+  if (!uid) redirect(`/login?next=/chat/${id}`);
+
+  // `getConversationHead` devuelve `null` también cuando la conversación existe
+  // pero no sos participante. Es a propósito que las dos den 404: distinguirlas
+  // le diría a cualquiera con un id si esa conversación existe.
+  const head = await getConversationHead(id);
+  if (!head) notFound();
+
+  const mensajes = await getMessages(id);
+
+  return <ConversationClient head={head} viewerId={uid} mensajes={mensajes} />;
 }

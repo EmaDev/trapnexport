@@ -1,4 +1,5 @@
-import { getNotifications, getSession, getUnreadChats } from "@/lib/social/queries";
+import { getUnreadChats } from "@/lib/chat/queries";
+import { getNotifications, getSession } from "@/lib/social/queries";
 import { AppShell } from "./AppShell";
 
 /** El feed, el chat y el perfil dependen de quién mira: nada de esto se puede

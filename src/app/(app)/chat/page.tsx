@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
-import { getConversations } from "@/lib/social/queries";
+import { getCurrentUid } from "@/lib/auth/sesion";
+import { getContactos, getConversations } from "@/lib/chat/queries";
 import { ChatListClient } from "./ChatListClient";
 
 export const metadata: Metadata = {
@@ -9,6 +11,11 @@ export const metadata: Metadata = {
 };
 
 export default async function ChatPage() {
-  const conversations = await getConversations();
-  return <ChatListClient conversations={conversations} />;
+  // La bandeja es de alguien: sin sesión no hay nada que listar, y mostrarla
+  // vacía se lee como "no tenés mensajes" y no como "no entraste".
+  if (!(await getCurrentUid())) redirect("/login?next=/chat");
+
+  const [conversations, contactos] = await Promise.all([getConversations(), getContactos()]);
+
+  return <ChatListClient conversations={conversations} contactos={contactos} />;
 }

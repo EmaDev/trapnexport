@@ -76,8 +76,8 @@ src/app/
     page.tsx                    /              Feed        AppHeaderCardSlot + SocialPost[]
     foro/page.tsx               /foro          Foro: los posteos de la comunidad
                                                FAB que abre el compositor en una hoja
-    chat/page.tsx               /chat          Bandeja (empujada, sin BottomNav)
-    chat/[id]/page.tsx          /chat/:id      Conversación (empujada, sin BottomNav)
+    chat/page.tsx               /chat          Bandeja: directas y grupos (empujada)
+    chat/[id]/page.tsx          /chat/:id      Conversación en vivo (onSnapshot)
     buscar/page.tsx             /buscar        Búsqueda de cuentas y publicaciones
     historia/page.tsx           /historia      Historia del club: 7 secciones en scroll
     historia/[year]/page.tsx    /historia/:año Temporada en detalle · generateMetadata
@@ -99,11 +99,11 @@ src/app/
     invitaciones/page.tsx       /admin/invitaciones    ABM · genera el link y la tarjeta
     cronograma/page.tsx         /admin/cronograma      ABM · calendario + lista
     historia/page.tsx           /admin/historia        Las 7 secciones de /historia, en solapas
+    presentacion/page.tsx       /admin/presentacion    La gala, a pantalla completa
+    mensajes/page.tsx           /admin/mensajes        Difusión del club + bandeja de respuestas
     usuarios/page.tsx           /admin/usuarios        DataTable · suspender/reactivar
     publicaciones/page.tsx      /admin/publicaciones   DataTable · ocultar/borrar
-    reportes/page.tsx           /admin/reportes        DataTable · revisar/descartar
-    ajustes/page.tsx            /admin/ajustes         Entorno + PwaStatus (sólo lectura)
-    login/page.tsx              /admin/login           Destino del guard (sin auth aún)
+    login/page.tsx              /admin/login           Login del panel (canjea la cookie)
 ```
 
 El límite cliente/servidor está en los dos `*Shell.tsx`, **no** en los layouts ni
@@ -116,11 +116,17 @@ Un solo origen para los dos módulos. El panel no tiene datos propios: lee y
 escribe exactamente lo mismo que el feed.
 
 ```
-src/lib/social/types.ts     Modelo de dominio (User, Post, CommentRow, Report…).
-src/lib/social/store.ts     Feed/comentarios/chat en memoria. Sin datos de relleno: sólo el plantel real y una sesión simulada.
-src/lib/social/queries.ts   Lecturas, ya mapeadas a los props de los componentes.
-src/lib/social/actions.ts   Escrituras como Server Actions, con revalidatePath.
-src/lib/social/notify.ts    Alta de avisos de campanita → Firestore (trapnexport-notification).
+src/lib/social/types.ts       Lo que queda del modelo propio: PlayerFicha, GalleryItem, NotificationKind. Las entidades son *Doc en firebase/schema.ts.
+src/lib/social/directorio.ts  Las cuentas de trapnexport-user, cacheadas por request. Reemplazó al array de usuarios en memoria.
+src/lib/social/queries.ts     Lecturas (feed, posts, comentarios, perfiles, notificaciones), ya mapeadas a los props.
+src/lib/social/actions.ts     Escrituras como Server Actions, con el uid sacado de la cookie.
+src/lib/social/notify.ts      Alta de avisos de campanita → Firestore (trapnexport-notification).
+
+src/lib/chat/queries.ts       Bandeja, encabezado y mensajes; la bandeja del club para el panel.
+src/lib/chat/actions.ts       Enviar, crear grupos, marcar leído y la difusión del panel.
+src/lib/chat/vivo.ts          Client · las escuchas onSnapshot. La ÚNICA lectura directa del navegador a Firestore.
+
+src/lib/auth/sesion.ts        Server · la cookie __session: emitir, cerrar, verificar, getCurrentUid/requireUid.
 
 src/lib/historia/types.ts      Modelo de la historia del club (ClubIdentity, Era, Season, Player…). Tipos puros: los importa también el cliente.
 src/lib/historia/seed.ts       La historia de arranque, tal como estaba escrita a mano. Hoy es semilla y fallback, no la fuente de verdad.
@@ -175,20 +181,21 @@ un instante UTC. `fromISODate` en `src/lib/time.ts` es el único lugar que las
 convierte a `Date`, y existe porque `new Date("2026-09-12")` parsea como UTC
 medianoche y en Argentina devuelve el día anterior.
 
-Las pantallas nunca tocan `store.ts`: piden un view-model a `queries.ts` y
-mutan por `actions.ts`. Migrar a Firestore es reescribir el cuerpo de esas dos
-capas; las firmas y las pantallas no se tocan. Ya cruzaron `contenido/` entero
-y las **notificaciones** de `social/` (`trapnexport-notification`, un documento
-por destinatario, escrito con el Admin SDK y con el fan-out sobre las cuentas
-reales de `trapnexport-user`). El feed, los comentarios y el chat de `social/`
-siguen en el store en memoria.
+Las pantallas nunca tocan Firestore: piden un view-model a `queries.ts` y mutan
+por `actions.ts`. Eso fue lo que permitió migrar el dominio entero sin tocar una
+sola pantalla — se reescribió el cuerpo de esas dos capas y las firmas quedaron
+iguales. **Ya no queda store en memoria**: cuentas, publicaciones, comentarios,
+carrete, chat y notificaciones son documentos.
 
-Lo que queda del store en memoria (`social/store.ts`) vive en `globalThis` a
-propósito: sin eso, en `next dev` cada recompilación borraría lo que publicaste.
+La única excepción a "las pantallas no tocan Firestore" es la conversación, que
+se engancha con `onSnapshot` desde el navegador (`lib/chat/vivo.ts`): sin eso los
+mensajes no llegarían solos. Es sólo lectura, y por eso es la única parte del
+dominio con reglas de lectura para el cliente.
 
-Los avatares y la media son **data-URI SVG** generados en `src/lib/media.ts`:
-deterministas por handle, sin depender de ningún host. Cuando haya storage real,
-se reemplaza el valor de `avatar` / `media[].src` por la URL y nada más cambia.
+Los avatares generados siguen siendo **data-URI SVG** de `src/lib/media.ts`,
+deterministas por handle: son el valor por defecto de una cuenta sin foto. Las
+fotos de verdad —avatar, carrete, publicaciones, historia— van a Firebase
+Storage y lo que se guarda es la `downloadURL` más la ruta del archivo.
 
 Para `/historia` hay tres generadores más en el mismo archivo: `photoUrl` (foto
 de archivo en 16:9), `playerPhotoUrl` (retrato 3:4) y `clipUrl` (portada de clip, que con `playing` devuelve el mismo SVG animado con
@@ -526,17 +533,17 @@ escudo real.
 
 ## Qué falta
 
-Está en [`PLAN.md`](PLAN.md), por fases y en orden. El resumen:
+El registro completo está en [`PLAN.md`](PLAN.md), por fases y con el porqué de
+cada decisión. Queda **una sola cosa**:
 
-- El módulo social (publicaciones, comentarios, chat) sigue en el store en
-  memoria de `lib/social/store.ts`, y sobre una identidad falsa: `currentUserId`
-  está fijo en una cuenta, así que el feed se ve igual inicie sesión quien
-  inicie. Todo lo demás depende de arreglar eso primero.
-- Avatares y carrete todavía viajan como data-URIs; los posts ya suben al bucket.
-- Mensajería de verdad: directas, grupos de varias personas y mensajes masivos
-  del club a los destinatarios que elija el panel. Con lecturas y tiempo real.
-- Push notifications: `web-push` y las claves VAPID están en el proyecto pero
-  todavía no hay flujo de suscripción.
+- **Push notifications.** `web-push` y las claves VAPID están en el proyecto y
+  `PushSubscriptionDoc` está escrito en el schema, pero no hay una sola línea de
+  código: `public/sw.js` no tiene handler de `push` ni existe el flujo de
+  suscripción.
 
-Auth real y la persistencia del contenido del panel **ya están** — si este
-README dice lo contrario en algún lado, el que vale es `PLAN.md`.
+Todo lo demás migró: no queda store en memoria, el dominio entero vive en
+Firestore y cada escritura la firma quien tiene la sesión. Si este README dice lo
+contrario en algún lado, el que vale es `PLAN.md`.
+
+Lo que **no** está verificado es el comportamiento en un navegador: typecheck,
+lint y build pasan, pero el flujo real todavía no se probó.

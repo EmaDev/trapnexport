@@ -114,19 +114,13 @@ export interface PostMediaItem {
  *  schema: `savedBy` ya no está en la publicación sino en
  *  `trapnexport-user/{uid}/saved`, y `hidden` dejó de ser opcional. */
 
-export interface Message {
-  id: string;
-  fromId: UserId;
-  text: string;
-  at: number;
-}
-
-export interface Conversation {
-  id: string;
-  /** siempre dos: la librería no trae mensajería de grupo */
-  participantIds: [UserId, UserId];
-  messages: Message[];
-}
+/*  Y acá vivían `Message` y `Conversation`, con `participantIds` como una tupla
+ *  de exactamente dos y los mensajes en un array embebido.
+ *
+ *  El chat entero se fue a `lib/chat/`: `ConversacionDoc` y `MensajeDoc` en el
+ *  schema. Las dos formas cambiaron por lo mismo —ahora hay grupos—: los
+ *  participantes son `string[]` y los mensajes una subcolección, porque una
+ *  conversación activa supera el tope de 1 MB del documento. */
 
 /** Los tipos de aviso de campanita.
  *

@@ -1,16 +1,14 @@
 import { adminDb } from "@/lib/firebase/admin";
-import { COL } from "@/lib/firebase/collections";
+import { CLUB_UID, COL } from "@/lib/firebase/collections";
 import type { UserDoc } from "@/lib/firebase/schema";
 import { shortDate } from "@/lib/time";
 
 /** Lecturas del panel sobre las cuentas **reales**, las de Firestore.
  *
  *  Es la mitad "read" del par con `actions.ts`, igual que `social/queries.ts`
- *  lo es de `social/actions.ts`. La diferencia con aquel es la fuente: aquel
- *  lee el store en memoria, que hoy sólo tiene las cuentas semilla del feed;
- *  esto lee `trapnexport-user`, que son las personas que efectivamente se
- *  registraron. Mientras el feed no migre, las dos listas conviven y no son la
- *  misma cosa — una es contenido de muestra, la otra son cuentas.
+ *  lo es de `social/actions.ts`. Ya no hay dos listas de cuentas conviviendo:
+ *  `trapnexport-user` es la única, y el feed lee la misma a través de
+ *  `lib/social/directorio.ts`.
  *
  *  Va con el Admin SDK y no con el del navegador porque el panel necesita ver
  *  lo que las reglas le esconden a cualquier cliente: cuentas suspendidas,
@@ -65,20 +63,25 @@ const fecha = (ts: { toMillis(): number } | null | undefined) =>
 export async function getCuentas(): Promise<CuentaRow[]> {
   const snap = await adminDb().collection(COL.user).orderBy("createdAt", "desc").get();
 
-  return snap.docs.map((d) => {
-    const u = d.data() as UserDoc;
-    return {
-      uid: d.id,
-      name: u.name,
-      handle: u.handle,
-      avatar: u.avatar,
-      posts: u.stats?.posts ?? 0,
-      alta: fecha(u.createdAt),
-      estado: ESTADO[u.status] ?? "activa",
-      verificado: Boolean(u.verified),
-      rol: u.role,
-    };
-  });
+  return snap.docs
+    // La cuenta del club no es una cuenta de nadie: es el remitente de las
+    // difusiones. No se puede suspender ni verificar, así que en una tabla de
+    // moderación sólo estorba.
+    .filter((d) => d.id !== CLUB_UID)
+    .map((d) => {
+      const u = d.data() as UserDoc;
+      return {
+        uid: d.id,
+        name: u.name,
+        handle: u.handle,
+        avatar: u.avatar,
+        posts: u.stats?.posts ?? 0,
+        alta: fecha(u.createdAt),
+        estado: ESTADO[u.status] ?? "activa",
+        verificado: Boolean(u.verified),
+        rol: u.role,
+      };
+    });
 }
 
 /** Las solicitudes del plantel pendientes de confirmación.

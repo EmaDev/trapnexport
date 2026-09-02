@@ -12,7 +12,6 @@ import type {
   PostDoc,
 } from "@/lib/firebase/schema";
 import { getDirectorio, type Directorio } from "@/lib/social/directorio";
-import { db } from "@/lib/social/store";
 import type { GalleryItem, NotificationKind, PlayerFicha } from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
 
@@ -20,10 +19,10 @@ import { relativeTime, shortDate } from "@/lib/time";
  *
  *  Las pantallas nunca arman props a mano: piden acá y reciben un view-model.
  *
- *  Ya salen de Firestore las cuentas (`lib/social/directorio.ts`), las
- *  publicaciones (`trapnexport-post`), los comentarios (`trapnexport-comment`) y
- *  las notificaciones. Quién mira sale de la cookie de sesión. Lo único que
- *  queda en el store en memoria es el chat y el carrete del perfil.
+ *  Todo sale de Firestore: las cuentas (`lib/social/directorio.ts`), las
+ *  publicaciones, los comentarios, el carrete y las notificaciones. Quién mira
+ *  sale de la cookie de sesión. Ya no queda store en memoria —el chat, que era
+ *  lo último, vive en `lib/chat/`.
  *
  *  Todo lo de este archivo corre en el servidor (Server Components y Server
  *  Actions). Es la mitad "read" del par read/write con `actions.ts`.
@@ -94,23 +93,6 @@ export interface ProfileVM {
   ficha: PlayerFicha;
   /** carrete propio, del mas nuevo al mas viejo */
   gallery: GalleryItem[];
-}
-
-export interface ConversationVM {
-  id: string;
-  peer: AuthorVM;
-  lastMessage: string;
-  lastAt: number;
-  time: string;
-  unread: number;
-  mine: boolean;
-}
-
-export interface MessageVM {
-  id: string;
-  role: "user" | "bot";
-  text: string;
-  at: number;
 }
 
 export interface NotificationVM {
@@ -476,61 +458,9 @@ export async function getSearchIndex(): Promise<SearchIndex> {
   };
 }
 
-/* ── chat ────────────────────────────────────────────────────────────────── */
-
-export async function getConversations(): Promise<ConversationVM[]> {
-  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
-  // Sin sesión no hay bandeja: las conversaciones son de a dos y hay que ser uno.
-  if (!viewerId) return [];
-
-  return db.conversations
-    .filter((c) => c.participantIds.includes(viewerId))
-    .map((c) => {
-      const peerId = c.participantIds.find((id) => id !== viewerId)!;
-      const last = c.messages[c.messages.length - 1];
-      return {
-        id: c.id,
-        peer: authorOf(peerId, dir),
-        lastMessage: last?.text ?? "",
-        lastAt: last?.at ?? 0,
-        time: last ? relativeTime(last.at) : "",
-        // sin backend de lecturas: "no leído" = el último mensaje es del otro
-        unread: last && last.fromId !== viewerId ? 1 : 0,
-        mine: last?.fromId === viewerId,
-      };
-    })
-    .sort((a, b) => b.lastAt - a.lastAt);
-}
-
-export async function getUnreadChats(): Promise<number> {
-  return (await getConversations()).reduce((n, c) => n + c.unread, 0);
-}
-
-export async function getConversation(
-  id: string,
-): Promise<{ id: string; peer: AuthorVM; messages: MessageVM[] } | null> {
-  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
-  if (!viewerId) return null;
-
-  const c = db.conversations.find((x) => x.id === id);
-  // Ser participante no es un detalle de presentación: sin este corte,
-  // cualquiera con el id lee la conversación de otros dos.
-  if (!c || !c.participantIds.includes(viewerId)) return null;
-
-  const peerId = c.participantIds.find((p) => p !== viewerId)!;
-
-  return {
-    id: c.id,
-    peer: authorOf(peerId, dir),
-    // `Chatbot` modela la conversación como user/bot: "bot" es el otro participante
-    messages: c.messages.map((m) => ({
-      id: m.id,
-      role: m.fromId === viewerId ? ("user" as const) : ("bot" as const),
-      text: m.text,
-      at: m.at,
-    })),
-  };
-}
+/*  El chat se fue a `lib/chat/`: tres tipos de conversación —directa, grupo y la
+ *  difusión del club—, con lecturas por persona y tiempo real, no entraban como
+ *  un apartado de este archivo. */
 
 /* ── notificaciones ──────────────────────────────────────────────────────── */
 

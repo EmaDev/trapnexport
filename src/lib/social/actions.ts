@@ -10,7 +10,6 @@ import { COL, SUB } from "@/lib/firebase/collections";
 import type { CommentDoc, GalleryDoc, PostDoc, UserDoc } from "@/lib/firebase/schema";
 import { getDirectorio } from "@/lib/social/directorio";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
-import { db, newId } from "@/lib/social/store";
 import type {
   GalleryItem,
   PiernaHabil,
@@ -508,37 +507,7 @@ export async function deleteComment(commentId: string): Promise<void> {
   revalidatePath("/admin");
 }
 
-/* ── chat ────────────────────────────────────────────────────────────────── */
-
-export async function sendMessage(conversationId: string, text: string): Promise<void> {
-  const uid = await getCurrentUid();
-  if (!uid) return;
-
-  const clean = text.trim();
-  const conv = db.conversations.find((c) => c.id === conversationId);
-  if (!conv || !clean) return;
-  // Escribir en una conversación ajena: mismo corte que en `getConversation`.
-  if (!conv.participantIds.includes(uid)) return;
-
-  conv.messages.push({ id: newId("m"), fromId: uid, text: clean, at: Date.now() });
-
-  // Campanita para el destinatario. Las conversaciones son siempre de a dos
-  // (ver `Conversation`), así que el otro participante es el que no soy yo.
-  const peerId = conv.participantIds.find((p) => p !== uid);
-  if (peerId) {
-    await notifyUser(peerId, {
-      kind: "message",
-      actorId: uid,
-      text: `${await nombreDe(uid)} te envió un mensaje`,
-      description: recorte(clean),
-      href: `/chat/${conversationId}`,
-    });
-  }
-
-  revalidatePath("/chat");
-  revalidatePath(`/chat/${conversationId}`);
-  revalidatePath("/notificaciones");
-}
+/*  Las escrituras del chat se fueron a `lib/chat/actions.ts`. */
 
 /* ── notificaciones ──────────────────────────────────────────────────────── */
 
