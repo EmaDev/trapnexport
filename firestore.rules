@@ -110,6 +110,16 @@ service cloud.firestore {
         allow read: if true;
         allow create, update, delete: if isSelf(uid) || isAdmin();
       }
+
+      /*  Las publicaciones guardadas. A diferencia del carrete, esto NO es
+       *  público: qué se guarda alguien no lo ve nadie más, ni siquiera el
+       *  autor de la publicación guardada.
+       *
+       *  Cerrado también a la escritura del cliente porque lo escribe el
+       *  servidor (`toggleSave`, con el uid de la cookie). */
+      match /saved/{postId} {
+        allow read, write: if false;
+      }
     }
 
     /* ── trapnexport-handle ──────────────────────────────────────────────── */
@@ -225,11 +235,30 @@ service cloud.firestore {
      *  verdad, acá irá `allow read: if isSelf(resource.data.userId)`. */
     match /trapnexport-notification/{id} { allow read, write: if false; }
 
+    /* ── el feed ─────────────────────────────────────────────────────────── */
+
+    /*  Publicaciones y comentarios.
+     *
+     *  **Lectura pública, y es a propósito**: `/post/:id` y `/u/:handle` están
+     *  hechos para compartirse por link y se indexan. No hay nada acá que no se
+     *  vea entrando a la app.
+     *
+     *  Escritura cerrada al cliente, aunque el autor "podría" escribir lo suyo.
+     *  El motivo es que ninguna de estas escrituras es un documento solo:
+     *  publicar mueve `stats.posts` del autor, comentar mueve `commentCount` de
+     *  la publicación, y `stats` es de sólo lectura para su dueño justamente
+     *  para que el número signifique algo. Todo eso sale del servidor
+     *  (`lib/social/actions.ts`), en lotes, con el uid de la cookie de sesión.
+     *
+     *  Ocultar y borrar, además, son moderación: pasan por `requireAdmin()`. */
+    match /trapnexport-post/{id}    { allow read: if true; allow write: if false; }
+    match /trapnexport-comment/{id} { allow read: if true; allow write: if false; }
+
     /* ── todo lo demás ───────────────────────────────────────────────────── */
 
-    /*  El resto del dominio (publicaciones, comentarios, chat) todavía vive en
-     *  el store en memoria. Hasta que migre, cerrado: una colección sin regla
-     *  explícita no puede quedar abierta por olvido. */
+    /*  Lo que queda del dominio en memoria es el chat y el carrete del perfil.
+     *  Hasta que migren, cerrado: una colección sin regla explícita no puede
+     *  quedar abierta por olvido. */
     match /{document=**} {
       allow read, write: if false;
     }

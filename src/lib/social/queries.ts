@@ -1,7 +1,10 @@
+import { Timestamp } from "firebase-admin/firestore";
+import { cache } from "react";
+
 import { getCurrentUid } from "@/lib/auth/sesion";
 import { adminDb } from "@/lib/firebase/admin";
-import { COL } from "@/lib/firebase/collections";
-import type { NotificacionDoc } from "@/lib/firebase/schema";
+import { COL, SUB } from "@/lib/firebase/collections";
+import type { CommentDoc, FsTimestamp, NotificacionDoc, PostDoc } from "@/lib/firebase/schema";
 import { getDirectorio, type Directorio } from "@/lib/social/directorio";
 import { db } from "@/lib/social/store";
 import type { GalleryItem, NotificationKind, PlayerFicha } from "@/lib/social/types";
@@ -9,14 +12,12 @@ import { relativeTime, shortDate } from "@/lib/time";
 
 /** Lecturas del dominio, ya mapeadas a lo que esperan los componentes.
  *
- *  Las pantallas nunca tocan `db` ni arman props a mano: piden acá y reciben
- *  un view-model.
+ *  Las pantallas nunca arman props a mano: piden acá y reciben un view-model.
  *
- *  Las **cuentas** ya salen de Firestore (`lib/social/directorio.ts`) y quién
- *  mira sale de la cookie de sesión (`lib/auth/sesion.ts`). Lo que todavía vive
- *  en el store en memoria son las publicaciones, los comentarios y el chat —y
- *  sus `authorId`, `likedBy` y `participantIds` ya guardan uid, no slugs, así
- *  que migrarlos a Firestore es cambiar de dónde se leen y nada más.
+ *  Ya salen de Firestore las cuentas (`lib/social/directorio.ts`), las
+ *  publicaciones (`trapnexport-post`), los comentarios (`trapnexport-comment`) y
+ *  las notificaciones. Quién mira sale de la cookie de sesión. Lo único que
+ *  queda en el store en memoria es el chat y el carrete del perfil.
  *
  *  Todo lo de este archivo corre en el servidor (Server Components y Server
  *  Actions). Es la mitad "read" del par read/write con `actions.ts`.
@@ -119,13 +120,85 @@ export interface NotificationVM {
   tone?: "info" | "success" | "warning" | "danger" | "neutral";
 }
 
+/* ── lectura de publicaciones ────────────────────────────────────────────── */
+
+/** Cuántas publicaciones trae el feed de una vez.
+ *
+ *  Hay un tope y no "todas" porque una consulta sin `limit` crece para siempre y
+ *  el día que moleste ya es tarde. Cincuenta es más de lo que nadie baja de una
+ *  sentada; cuando haga falta más, esto pasa a paginar con `startAfter` y la
+ *  pantalla suma un "ver más". */
+const FEED_LIMIT = 50;
+
+/** Cuántos ids admite un `where(..., "in", [...])` de Firestore. */
+const IN_MAX = 30;
+
+type PostConId = PostDoc & { id: string };
+type ComentarioConId = CommentDoc & { id: string };
+
+/** `serverTimestamp()` llega en `null` hasta que el servidor confirma: sin el
+ *  fallback, una publicación recién creada aparece fechada en 1970. */
+const aMillis = (t: FsTimestamp | undefined | null) => t?.toMillis() ?? Date.now();
+
+const aPosts = (snap: FirebaseFirestore.QuerySnapshot): PostConId[] =>
+  snap.docs.map((d) => ({ id: d.id, ...(d.data() as PostDoc) }));
+
+/** Los comentarios de varias publicaciones, agrupados por publicación.
+ *
+ *  Una sola query para todo el feed en vez de una por publicación. `in` admite
+ *  treinta valores, así que con el `FEED_LIMIT` de cincuenta son dos consultas.
+ *
+ *  **Dónde deja de servir:** trae *todos* los comentarios de las publicaciones
+ *  en pantalla, aunque el feed muestre dos por publicación (`pageSize` de
+ *  `CommentBox`). Con un club es un puñado de documentos; si un posteo se llena
+ *  de comentarios, acá va un `limit` por publicación y la pantalla de detalle
+ *  pasa a pedir el resto aparte.
+ */
+async function comentariosDe(postIds: string[]): Promise<Map<string, ComentarioConId[]>> {
+  const porPost = new Map<string, ComentarioConId[]>();
+  if (!postIds.length) return porPost;
+
+  const tandas: string[][] = [];
+  for (let i = 0; i < postIds.length; i += IN_MAX) tandas.push(postIds.slice(i, i + IN_MAX));
+
+  const snaps = await Promise.all(
+    tandas.map((ids) =>
+      adminDb()
+        .collection(COL.comment)
+        .where("postId", "in", ids)
+        .orderBy("createdAt", "asc")
+        .get(),
+    ),
+  );
+
+  for (const snap of snaps) {
+    for (const d of snap.docs) {
+      const c = { id: d.id, ...(d.data() as CommentDoc) };
+      const lista = porPost.get(c.postId);
+      if (lista) lista.push(c);
+      else porPost.set(c.postId, [c]);
+    }
+  }
+
+  return porPost;
+}
+
+/** Los ids de las publicaciones que esta persona guardó.
+ *
+ *  Se trae la subcolección entera —es privada y chica, son las que uno guardó a
+ *  mano— en vez de preguntar por cada publicación de la pantalla, que serían
+ *  cincuenta lecturas puntuales. `cache()` la memoiza por request. */
+const guardadosDe = cache(async (uid: string): Promise<Set<string>> => {
+  const snap = await adminDb().collection(COL.user).doc(uid).collection(SUB.saved).get();
+  return new Set(snap.docs.map((d) => d.id));
+});
+
 /* ── helpers internos ────────────────────────────────────────────────────── */
 
 /** El autor de algo, para la UI.
  *
  *  Nunca falla: una cuenta borrada deja publicaciones y comentarios que igual
- *  hay que dibujar. Antes esto podía pasar sólo en teoría (las cuentas eran
- *  semilla y no se borraban); ahora el panel las borra de verdad. */
+ *  hay que dibujar. */
 const authorOf = (uid: string, dir: Directorio): AuthorVM => {
   const u = dir.byId(uid);
   return {
@@ -136,50 +209,78 @@ const authorOf = (uid: string, dir: Directorio): AuthorVM => {
   };
 };
 
-const commentsOf = (postId: string, viewerId: string | null, dir: Directorio): CommentVM[] =>
-  db.comments
-    .filter((c) => c.postId === postId)
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .map((c) => {
-      const author = dir.byId(c.authorId);
-      return {
-        id: c.id,
-        author: author?.name ?? "Cuenta eliminada",
-        avatar: author?.avatar,
-        text: c.text,
-        at: c.createdAt,
-        likes: c.likedBy.length,
-        // Sin sesión nada figura como propio: un visitante no likeó nada.
-        liked: viewerId ? c.likedBy.includes(viewerId) : false,
-        parentId: c.parentId ?? null,
-        pinned: c.pinned,
-        authorBadge: author?.verified ? "Verificado" : undefined,
-      };
-    });
+const toCommentVM = (
+  c: ComentarioConId,
+  viewerId: string | null,
+  dir: Directorio,
+): CommentVM => {
+  const author = dir.byId(c.authorId);
+  return {
+    id: c.id,
+    author: author?.name ?? "Cuenta eliminada",
+    avatar: author?.avatar,
+    text: c.text,
+    at: aMillis(c.createdAt),
+    likes: c.likedBy?.length ?? 0,
+    // Sin sesión nada figura como propio: un visitante no likeó nada.
+    liked: viewerId ? !!c.likedBy?.includes(viewerId) : false,
+    parentId: c.parentId ?? null,
+    pinned: c.pinned,
+    authorBadge: author?.verified ? "Verificado" : undefined,
+  };
+};
 
-const toPostVM = (postId: string, viewerId: string | null, dir: Directorio): PostVM | null => {
-  const p = db.posts.find((x) => x.id === postId);
-  if (!p) return null;
+const toPostVM = (
+  p: PostConId,
+  comentarios: ComentarioConId[],
+  viewerId: string | null,
+  dir: Directorio,
+  guardados: Set<string>,
+): PostVM => {
+  const comments = comentarios.map((c) => toCommentVM(c, viewerId, dir));
+  const likedBy = p.likedBy ?? [];
 
-  const comments = commentsOf(p.id, viewerId, dir);
   return {
     id: p.id,
     author: authorOf(p.authorId, dir),
-    time: relativeTime(p.createdAt),
-    createdAt: p.createdAt,
+    time: relativeTime(aMillis(p.createdAt)),
+    createdAt: aMillis(p.createdAt),
     text: p.text,
-    media: p.media,
-    counts: { likes: p.likedBy.length, comments: comments.length, shares: p.shares },
-    liked: viewerId ? p.likedBy.includes(viewerId) : false,
-    saved: viewerId ? p.savedBy.includes(viewerId) : false,
-    likedBy: p.likedBy.map((id) => dir.byId(id)?.name.split(" ")[0] ?? "Alguien").slice(0, 3),
+    media: p.media ?? [],
+    counts: {
+      likes: likedBy.length,
+      // El desnormalizado y no `comments.length`: el feed no baja todos los
+      // comentarios de una publicación con muchos, pero el número tiene que
+      // seguir siendo el real.
+      comments: p.commentCount ?? comments.length,
+      shares: p.shares ?? 0,
+    },
+    liked: viewerId ? likedBy.includes(viewerId) : false,
+    saved: guardados.has(p.id),
+    likedBy: likedBy.map((id) => dir.byId(id)?.name.split(" ")[0] ?? "Alguien").slice(0, 3),
     comments,
   };
 };
 
-/** Los uid de las cuentas suspendidas: no se muestran ni sus publicaciones. */
-const suspendidas = (dir: Directorio) =>
-  new Set(dir.todas().filter((u) => u.suspended).map((u) => u.id));
+/** Arma los view-models de una tanda de publicaciones: comentarios, guardados y
+ *  autores en las mínimas consultas posibles. */
+async function armarPosts(posts: PostConId[]): Promise<PostVM[]> {
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  const [comentarios, guardados] = await Promise.all([
+    comentariosDe(posts.map((p) => p.id)),
+    viewerId ? guardadosDe(viewerId) : Promise.resolve(new Set<string>()),
+  ]);
+
+  // Las publicaciones de cuentas suspendidas no se muestran. El filtro es acá y
+  // no en la query porque la suspensión vive en la cuenta, no en el post:
+  // consultarla en Firestore obligaría a duplicar el estado en cada documento y
+  // a reescribirlos todos al suspender a alguien.
+  const ocultas = new Set(dir.todas().filter((u) => u.suspended).map((u) => u.id));
+
+  return posts
+    .filter((p) => !ocultas.has(p.authorId))
+    .map((p) => toPostVM(p, comentarios.get(p.id) ?? [], viewerId, dir, guardados));
+}
 
 /* ── sesión ──────────────────────────────────────────────────────────────── */
 
@@ -205,50 +306,67 @@ export async function getSession(): Promise<SessionVM | null> {
 /* ── feed y posts ────────────────────────────────────────────────────────── */
 
 export async function getFeed(): Promise<PostVM[]> {
-  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
-  const ocultas = suspendidas(dir);
+  const snap = await adminDb()
+    .collection(COL.post)
+    .where("hidden", "==", false)
+    .orderBy("createdAt", "desc")
+    .limit(FEED_LIMIT)
+    .get();
 
-  return db.posts
-    .filter((p) => !p.hidden && !ocultas.has(p.authorId))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => toPostVM(p.id, viewerId, dir)!)
-    .filter(Boolean);
+  return armarPosts(aPosts(snap));
 }
 
 export async function getPost(id: string): Promise<PostVM | null> {
-  const p = db.posts.find((x) => x.id === id);
-  if (!p || p.hidden) return null;
+  const doc = await adminDb().collection(COL.post).doc(id).get();
+  if (!doc.exists) return null;
 
-  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
-  return toPostVM(id, viewerId, dir);
+  const p = { id: doc.id, ...(doc.data() as PostDoc) };
+  if (p.hidden) return null;
+
+  const [vm] = await armarPosts([p]);
+  // `armarPosts` filtra cuentas suspendidas: si el autor lo está, no hay post.
+  return vm ?? null;
 }
 
 export async function getPostsByHandle(handle: string): Promise<PostVM[]> {
-  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  const dir = await getDirectorio();
   const user = dir.byHandle(handle);
   if (!user) return [];
 
-  return db.posts
-    .filter((p) => p.authorId === user.id && !p.hidden)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => toPostVM(p.id, viewerId, dir)!);
+  const snap = await adminDb()
+    .collection(COL.post)
+    .where("authorId", "==", user.id)
+    .where("hidden", "==", false)
+    .orderBy("createdAt", "desc")
+    .limit(FEED_LIMIT)
+    .get();
+
+  return armarPosts(aPosts(snap));
 }
 
 /* ── perfiles ────────────────────────────────────────────────────────────── */
 
 /** El carrete de una cuenta.
  *
- *  Todavía en memoria, y ahora en un mapa por uid en vez de colgado del `User`
- *  —que ya no existe—. La subcolección `trapnexport-user/{uid}/gallery` está
- *  definida en el schema (`GalleryDoc`) pero se llena en la Fase 4, junto con la
- *  subida a Storage: hoy los items son data-URIs y no pueden entrar a un
- *  documento de Firestore, que tiene tope de 1 MB. */
+ *  Todavía en memoria, en un mapa por uid. La subcolección
+ *  `trapnexport-user/{uid}/gallery` está definida en el schema (`GalleryDoc`)
+ *  pero se llena en la Fase 4, junto con la subida a Storage: hoy los items son
+ *  data-URIs y no pueden entrar a un documento de Firestore. */
 const galeriaDe = (uid: string): GalleryItem[] => db.gallery[uid] ?? [];
 
 export async function getProfile(handle: string): Promise<ProfileVM | null> {
   const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
   const u = dir.byHandle(handle);
   if (!u || u.suspended) return null;
+
+  // Contar publicaciones, no traerlas: la pantalla ya las pide por su cuenta con
+  // `getPostsByHandle` y acá sólo se necesita el número.
+  const cuenta = await adminDb()
+    .collection(COL.post)
+    .where("authorId", "==", u.id)
+    .where("hidden", "==", false)
+    .count()
+    .get();
 
   return {
     id: u.id,
@@ -260,9 +378,7 @@ export async function getProfile(handle: string): Promise<ProfileVM | null> {
     verified: u.verified,
     joined: shortDate(u.joinedAt),
     isMe: u.id === viewerId,
-    stats: {
-      posts: db.posts.filter((p) => p.authorId === u.id && !p.hidden).length,
-    },
+    stats: { posts: cuenta.data().count },
     ficha: u.ficha,
     gallery: [...galeriaDe(u.id)].sort((a, b) => b.addedAt - a.addedAt),
   };
@@ -295,8 +411,18 @@ export interface SearchIndex {
  *  Las cuentas suspendidas no entran: si el feed no las muestra, el buscador
  *  tampoco puede ser la puerta de atrás. */
 export async function getSearchIndex(): Promise<SearchIndex> {
-  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
-  const ocultas = suspendidas(dir);
+  const [viewerId, dir, snap] = await Promise.all([
+    getCurrentUid(),
+    getDirectorio(),
+    adminDb()
+      .collection(COL.post)
+      .where("hidden", "==", false)
+      .orderBy("createdAt", "desc")
+      .limit(FEED_LIMIT)
+      .get(),
+  ]);
+
+  const ocultas = new Set(dir.todas().filter((u) => u.suspended).map((u) => u.id));
 
   return {
     accounts: dir
@@ -312,14 +438,13 @@ export async function getSearchIndex(): Promise<SearchIndex> {
         bio: u.bio,
       })),
 
-    posts: db.posts
-      .filter((p) => !p.hidden && !ocultas.has(p.authorId))
-      .sort((a, b) => b.createdAt - a.createdAt)
+    posts: aPosts(snap)
+      .filter((p) => !ocultas.has(p.authorId))
       .map((p) => ({
         id: p.id,
         text: p.text,
         author: authorOf(p.authorId, dir).name,
-        time: relativeTime(p.createdAt),
+        time: relativeTime(aMillis(p.createdAt)),
       })),
   };
 }
@@ -459,14 +584,29 @@ export interface AdminStats {
 }
 
 export async function getAdminStats(): Promise<AdminStats> {
-  const dir = await getDirectorio();
+  const db2 = adminDb();
   const day = 86_400_000;
   const today = new Date().setHours(23, 59, 59, 999);
+  const desde = Timestamp.fromMillis(today - 7 * day);
 
+  /*  Los tres primeros son agregaciones: devuelven un número sin traer los
+   *  documentos. El panel mostraba estos contadores recorriendo el array
+   *  entero, que en Firestore sería leer —y pagar— la colección completa cada
+   *  vez que alguien abre `/admin`. */
+  const [dir, total, ocultos, comentarios, ultimaSemana] = await Promise.all([
+    getDirectorio(),
+    db2.collection(COL.post).count().get(),
+    db2.collection(COL.post).where("hidden", "==", true).count().get(),
+    db2.collection(COL.comment).count().get(),
+    // El sparkline sí necesita las fechas, pero sólo de la última semana.
+    db2.collection(COL.post).where("createdAt", ">=", desde).get(),
+  ]);
+
+  const fechas = ultimaSemana.docs.map((d) => aMillis((d.data() as PostDoc).createdAt));
   const postsPorDia = Array.from({ length: 7 }, (_, i) => {
     const to = today - (6 - i) * day;
     const from = to - day;
-    return db.posts.filter((p) => p.createdAt > from && p.createdAt <= to).length;
+    return fechas.filter((t) => t > from && t <= to).length;
   });
 
   const cuentas = dir.todas();
@@ -474,30 +614,32 @@ export async function getAdminStats(): Promise<AdminStats> {
   return {
     usuarios: cuentas.length,
     suspendidos: cuentas.filter((u) => u.suspended).length,
-    posts: db.posts.length,
-    ocultos: db.posts.filter((p) => p.hidden).length,
-    comentarios: db.comments.length,
+    posts: total.data().count,
+    ocultos: ocultos.data().count,
+    comentarios: comentarios.data().count,
     postsPorDia,
   };
 }
 
 export async function getAdminPosts(): Promise<AdminPostRow[]> {
-  const dir = await getDirectorio();
+  // Sin filtrar por `hidden`: el panel es justamente donde se ven las ocultas.
+  const [dir, snap] = await Promise.all([
+    getDirectorio(),
+    adminDb().collection(COL.post).orderBy("createdAt", "desc").limit(200).get(),
+  ]);
 
-  return db.posts
-    .map((p) => {
-      const author = dir.byId(p.authorId);
-      return {
-        id: p.id,
-        autor: author?.name ?? "Cuenta eliminada",
-        handle: author?.handle ?? "",
-        texto: p.text,
-        fecha: shortDate(p.createdAt),
-        createdAt: p.createdAt,
-        likes: p.likedBy.length,
-        comentarios: db.comments.filter((c) => c.postId === p.id).length,
-        estado: (p.hidden ? "oculto" : "publicado") as AdminPostRow["estado"],
-      };
-    })
-    .sort((a, b) => b.createdAt - a.createdAt);
+  return aPosts(snap).map((p) => {
+    const author = dir.byId(p.authorId);
+    return {
+      id: p.id,
+      autor: author?.name ?? "Cuenta eliminada",
+      handle: author?.handle ?? "",
+      texto: p.text,
+      fecha: shortDate(aMillis(p.createdAt)),
+      createdAt: aMillis(p.createdAt),
+      likes: p.likedBy?.length ?? 0,
+      comentarios: p.commentCount ?? 0,
+      estado: (p.hidden ? "oculto" : "publicado") as AdminPostRow["estado"],
+    };
+  });
 }

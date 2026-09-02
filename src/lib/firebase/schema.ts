@@ -349,6 +349,82 @@ export interface CronogramaConfigDoc {
   updatedAt: FsTimestamp;
 }
 
+/* ── trapnexport-post/{id} ───────────────────────────────────────────────── */
+
+/** Una imagen de una publicación. */
+export interface PostMediaDoc {
+  /** `downloadURL` de Firebase Storage (ver `lib/storage/post-image.ts`) */
+  src: string;
+  alt: string;
+  /** ruta del archivo en el bucket, para borrarlo cuando se elimina el post.
+   *  Ausente en publicaciones anteriores a la subida a Storage. */
+  path?: string;
+}
+
+/** Una publicación del feed. `trapnexport-post/{id}`.
+ *
+ *  La escribe y la lee **el servidor** con el Admin SDK: el feed sale de Server
+ *  Components y las escrituras son Server Actions que sacan el uid de la cookie
+ *  de sesión. Por eso `firestore.rules` la deja abierta a lectura —el feed es
+ *  público, se comparte por link— y cerrada a escritura desde el cliente.
+ */
+export interface PostDoc {
+  /** uid de Firebase Auth de quien publicó */
+  authorId: string;
+  text: string;
+  media: PostMediaDoc[];
+  createdAt: FsTimestamp;
+  /** uid de quienes reaccionaron; el contador sale del `length`.
+   *
+   *  Array embebido y no subcolección, al revés que `saved`: el like tiene
+   *  contador visible y se muestran los primeros nombres, así que se lee en la
+   *  misma lectura que la publicación. El techo es el tope de 1 MB del
+   *  documento, que a ~30 bytes por uid son decenas de miles de likes. */
+  likedBy: string[];
+  shares: number;
+  /** oculto por moderación: invisible en el feed, visible en `/admin`.
+   *
+   *  **Siempre presente, incluso en `false`.** No es cosmética: el feed
+   *  consulta `where("hidden", "==", false)`, y una query de igualdad en
+   *  Firestore **no devuelve** los documentos a los que les falta el campo. Un
+   *  `hidden` opcional haría que las publicaciones nuevas no aparecieran. */
+  hidden: boolean;
+  /** comentarios vivos, desnormalizado.
+   *
+   *  Se guarda porque el feed muestra "Comentarios (N)" en cada publicación:
+   *  contarlos de verdad sería una query por publicación en pantalla. Lo mueven
+   *  `addComment` y `deleteComment` con `increment`, en el mismo lote que el
+   *  alta o la baja del comentario. */
+  commentCount: number;
+}
+
+/* ── trapnexport-comment/{id} ────────────────────────────────────────────── */
+
+/** Un comentario o una respuesta. `trapnexport-comment/{id}`. */
+export interface CommentDoc {
+  /** id del documento en `trapnexport-post` */
+  postId: string;
+  /** uid de Firebase Auth de quien comentó */
+  authorId: string;
+  text: string;
+  createdAt: FsTimestamp;
+  likedBy: string[];
+  /** `null` = comentario raíz; un id = respuesta a ese comentario */
+  parentId: string | null;
+  pinned?: boolean;
+}
+
+/* ── trapnexport-user/{uid}/saved/{postId} ───────────────────────────────── */
+
+/** Una publicación guardada. **El id del documento es el id de la publicación**,
+ *  así que guardar dos veces es escribir el mismo documento y no hay duplicados.
+ *
+ *  El documento no necesita más que la fecha: existir ya significa "guardada".
+ */
+export interface GuardadoDoc {
+  createdAt: FsTimestamp;
+}
+
 /* ── trapnexport-notification/{id} ──────────────────────────────────────────── */
 
 /** Un aviso de campanita. **Un documento por destinatario**, no un doc

@@ -3,9 +3,11 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { revalidatePath } from "next/cache";
 
+import { requireAdmin } from "@/lib/admin/auth";
 import { getCurrentUid } from "@/lib/auth/sesion";
-import { adminDb } from "@/lib/firebase/admin";
-import { COL } from "@/lib/firebase/collections";
+import { adminDb, borrarDelBucket } from "@/lib/firebase/admin";
+import { COL, SUB } from "@/lib/firebase/collections";
+import type { CommentDoc, PostDoc } from "@/lib/firebase/schema";
 import { getDirectorio } from "@/lib/social/directorio";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
 import { db, newId } from "@/lib/social/store";
@@ -43,12 +45,6 @@ const nombreDe = async (uid: string) => (await getDirectorio()).byId(uid)?.name 
 
 /** El handle de una cuenta, para revalidar su perfil público. */
 const handleDe = async (uid: string) => (await getDirectorio()).byId(uid)?.handle;
-
-const toggleIn = (list: string[], id: string, on: boolean) => {
-  const i = list.indexOf(id);
-  if (on && i === -1) list.push(id);
-  if (!on && i !== -1) list.splice(i, 1);
-};
 
 /** Primer renglón de un texto para la bajada de una notificación: una línea,
  *  sin cortar a mitad de palabra y con puntos suspensivos si sobra. */
@@ -89,17 +85,32 @@ export async function publishPost(
   const fotos = media.filter((m) => m.src).slice(0, 4);
   if (!clean && fotos.length === 0) return;
 
-  const id = newId("p");
-  db.posts.unshift({
-    id,
+  const db2 = adminDb();
+  const ref = db2.collection(COL.post).doc();
+
+  /*  El alta y el contador del autor, juntos. Si el contador se moviera aparte,
+   *  un error entre las dos escrituras dejaria un perfil diciendo "12
+   *  publicaciones" con once. */
+  const batch = db2.batch();
+  batch.set(ref, {
     authorId: uid,
     text: clean,
     media: fotos,
-    createdAt: Date.now(),
+    createdAt: FieldValue.serverTimestamp(),
     likedBy: [],
-    savedBy: [],
     shares: 0,
+    // Explicito y no omitido: el feed consulta `where("hidden", "==", false)` y
+    // una query de igualdad no devuelve los documentos sin el campo.
+    hidden: false,
+    commentCount: 0,
   });
+  batch.update(db2.collection(COL.user).doc(uid), {
+    "stats.posts": FieldValue.increment(1),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  await batch.commit();
+
+  const id = ref.id;
 
   // Aviso de campanita al resto de la comunidad: alguien publicó en el feed.
   // `notifyAll` ya excluye al autor.
@@ -121,11 +132,20 @@ export async function toggleLike(postId: string, liked: boolean): Promise<void> 
   const uid = await getCurrentUid();
   if (!uid) return;
 
-  const post = db.posts.find((p) => p.id === postId);
+  const ref = adminDb().collection(COL.post).doc(postId);
+  const snap = await ref.get();
+  const post = snap.data() as PostDoc | undefined;
   if (!post) return;
 
-  const yaEstaba = post.likedBy.includes(uid);
-  toggleIn(post.likedBy, uid, liked);
+  const yaEstaba = !!post.likedBy?.includes(uid);
+
+  /*  `arrayUnion`/`arrayRemove` y no escribir el array entero: dos personas
+   *  dando like a la vez con la lista completa se pisan y uno de los dos likes
+   *  desaparece. Estas dos operaciones las resuelve el servidor de Firestore
+   *  sobre el valor actual, sin importar con qué copia llegó cada uno. */
+  await ref.update({
+    likedBy: liked ? FieldValue.arrayUnion(uid) : FieldValue.arrayRemove(uid),
+  });
 
   // Un aviso al autor por cada like NUEVO —quitar y volver a poner el like
   // vuelve a avisar, sacarlo no—. `notifyUser` ya descarta el like a uno mismo.
@@ -143,22 +163,33 @@ export async function toggleLike(postId: string, liked: boolean): Promise<void> 
   revalidatePublic(postId);
 }
 
+/** Guarda o desguarda una publicación.
+ *
+ *  Escribe en `trapnexport-user/{uid}/saved/{postId}`, no en la publicación: es
+ *  privado, no tiene contador visible, y si viviera en el post cada "guardar"
+ *  reescribiría el documento que todo el feed está leyendo. El id del documento
+ *  es el de la publicación, así que guardar dos veces es idempotente. */
 export async function toggleSave(postId: string, saved: boolean): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
 
-  const post = db.posts.find((p) => p.id === postId);
-  if (!post) return;
+  const ref = adminDb().collection(COL.user).doc(uid).collection(SUB.saved).doc(postId);
 
-  toggleIn(post.savedBy, uid, saved);
+  if (saved) await ref.set({ createdAt: FieldValue.serverTimestamp() });
+  else await ref.delete().catch(() => {});
+
   revalidatePublic(postId);
 }
 
 export async function registerShare(postId: string): Promise<void> {
-  const post = db.posts.find((p) => p.id === postId);
-  if (!post) return;
+  // Sin sesión: compartir un link es algo que puede hacer cualquiera que vea la
+  // publicación, y el contador cuenta veces compartida, no personas.
+  await adminDb()
+    .collection(COL.post)
+    .doc(postId)
+    .update({ shares: FieldValue.increment(1) })
+    .catch(() => {});
 
-  post.shares += 1;
   revalidatePublic(postId);
 }
 
@@ -333,29 +364,44 @@ export async function addComment(
   const clean = text.trim();
   if (!clean) return;
 
-  db.comments.push({
-    id: newId("c"),
+  const db2 = adminDb();
+  const postRef = db2.collection(COL.post).doc(postId);
+  const snap = await postRef.get();
+  const post = snap.data() as PostDoc | undefined;
+  // Comentar una publicación que ya no está dejaría un comentario huérfano que
+  // ninguna pantalla muestra.
+  if (!post) return;
+
+  /*  Comentario, contador de la publicación y contador del autor, en un lote.
+   *  `commentCount` está desnormalizado para que el feed no tenga que contar
+   *  comentarios por publicación; si se moviera aparte del alta, el número
+   *  dejaría de coincidir con la lista apenas fallara una de las dos. */
+  const batch = db2.batch();
+  batch.set(db2.collection(COL.comment).doc(), {
     postId,
     authorId: uid,
     text: clean,
-    createdAt: Date.now(),
+    createdAt: FieldValue.serverTimestamp(),
     likedBy: [],
     parentId: parentId ?? null,
   });
+  batch.update(postRef, { commentCount: FieldValue.increment(1) });
+  batch.update(db2.collection(COL.user).doc(uid), {
+    "stats.comments": FieldValue.increment(1),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  await batch.commit();
 
   // Aviso al autor del post por cada comentario (una respuesta también lo es).
   // `notifyUser` descarta comentar el propio post.
-  const post = db.posts.find((p) => p.id === postId);
-  if (post) {
-    await notifyUser(post.authorId, {
-      kind: "comment",
-      actorId: uid,
-      text: `${await nombreDe(uid)} comentó tu publicación`,
-      description: recorte(clean),
-      href: `/post/${postId}`,
-    });
-    revalidatePath("/notificaciones");
-  }
+  await notifyUser(post.authorId, {
+    kind: "comment",
+    actorId: uid,
+    text: `${await nombreDe(uid)} comentó tu publicación`,
+    description: recorte(clean),
+    href: `/post/${postId}`,
+  });
+  revalidatePath("/notificaciones");
 
   revalidatePublic(postId);
   revalidatePath("/admin");
@@ -365,10 +411,15 @@ export async function toggleCommentLike(commentId: string, liked: boolean): Prom
   const uid = await getCurrentUid();
   if (!uid) return;
 
-  const comment = db.comments.find((c) => c.id === commentId);
+  const ref = adminDb().collection(COL.comment).doc(commentId);
+  const snap = await ref.get();
+  const comment = snap.data() as CommentDoc | undefined;
   if (!comment) return;
 
-  toggleIn(comment.likedBy, uid, liked);
+  await ref.update({
+    likedBy: liked ? FieldValue.arrayUnion(uid) : FieldValue.arrayRemove(uid),
+  });
+
   revalidatePublic(comment.postId);
 }
 
@@ -386,15 +437,38 @@ export async function deleteComment(commentId: string): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
 
-  const i = db.comments.findIndex((c) => c.id === commentId);
-  if (i === -1) return;
-  if (db.comments[i].authorId !== uid) return;
+  const db2 = adminDb();
+  const ref = db2.collection(COL.comment).doc(commentId);
+  const snap = await ref.get();
+  const comment = snap.data() as CommentDoc | undefined;
+  if (!comment) return;
+  if (comment.authorId !== uid) return;
 
-  const [removed] = db.comments.splice(i, 1);
-  // las respuestas de un comentario borrado quedarían huérfanas
-  db.comments = db.comments.filter((c) => c.parentId !== commentId);
+  // Las respuestas de un comentario borrado quedarían huérfanas: ninguna
+  // pantalla las dibuja, porque `CommentBox` las cuelga de su padre.
+  const respuestas = await db2
+    .collection(COL.comment)
+    .where("parentId", "==", commentId)
+    .get();
 
-  revalidatePublic(removed.postId);
+  const borrados = 1 + respuestas.size;
+
+  const batch = db2.batch();
+  batch.delete(ref);
+  respuestas.docs.forEach((d) => batch.delete(d.ref));
+  batch.update(db2.collection(COL.post).doc(comment.postId), {
+    commentCount: FieldValue.increment(-borrados),
+  });
+  /*  El contador del autor baja sólo por el comentario propio. Las respuestas
+   *  borradas de arrastre son de otras cuentas y no se descuentan de las suyas:
+   *  hacerlo bien serían N lecturas para saber de quién es cada una, y el
+   *  número que queda mal es una estadística del perfil, no un permiso. */
+  batch.update(db2.collection(COL.user).doc(uid), {
+    "stats.comments": FieldValue.increment(-1),
+  });
+  await batch.commit();
+
+  revalidatePublic(comment.postId);
   revalidatePath("/admin");
 }
 
@@ -485,18 +559,52 @@ export async function dismissNotification(id: string): Promise<void> {
 /* ── moderación (sólo /admin) ────────────────────────────────────────────── */
 
 export async function setPostHidden(postId: string, hidden: boolean): Promise<void> {
-  const post = db.posts.find((p) => p.id === postId);
-  if (!post) return;
+  await requireAdmin();
 
-  post.hidden = hidden;
+  await adminDb().collection(COL.post).doc(postId).update({ hidden }).catch(() => {});
+
   revalidatePublic(postId);
   revalidatePath("/admin");
   revalidatePath("/admin/publicaciones");
 }
 
+/** Borra una publicación, sus comentarios y sus imágenes.
+ *
+ *  Las imágenes son lo nuevo: `PostMediaDoc.path` existía desde que el
+ *  compositor sube a Storage y no lo usaba nadie, así que cada publicación
+ *  borrada dejaba sus fotos en el bucket para siempre. Se borran con el Admin
+ *  SDK y no desde el navegador porque quien aprieta el botón es el panel, que no
+ *  es el dueño de los archivos.
+ *
+ *  El orden importa: primero los documentos, después los archivos. Al revés, un
+ *  fallo en el medio dejaría una publicación viva apuntando a fotos que ya no
+ *  existen — un post roto es peor que un archivo huérfano.
+ */
 export async function deletePost(postId: string): Promise<void> {
-  db.posts = db.posts.filter((p) => p.id !== postId);
-  db.comments = db.comments.filter((c) => c.postId !== postId);
+  await requireAdmin();
+
+  const db2 = adminDb();
+  const postRef = db2.collection(COL.post).doc(postId);
+
+  const [snap, comentarios] = await Promise.all([
+    postRef.get(),
+    db2.collection(COL.comment).where("postId", "==", postId).get(),
+  ]);
+
+  const post = snap.data() as PostDoc | undefined;
+  if (!post) return;
+
+  const batch = db2.batch();
+  batch.delete(postRef);
+  comentarios.docs.forEach((d) => batch.delete(d.ref));
+  batch.update(db2.collection(COL.user).doc(post.authorId), {
+    "stats.posts": FieldValue.increment(-1),
+  });
+  await batch.commit();
+
+  await Promise.all(
+    (post.media ?? []).map((m) => (m.path ? borrarDelBucket(m.path) : Promise.resolve())),
+  );
 
   revalidatePublic();
   revalidatePath("/admin");

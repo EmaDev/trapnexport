@@ -103,31 +103,16 @@ export interface PostMediaItem {
   path?: string;
 }
 
-export interface Post {
-  id: string;
-  authorId: UserId;
-  text: string;
-  media: PostMediaItem[];
-  createdAt: number;
-  /** ids de quienes reaccionaron; el contador sale del length */
-  likedBy: UserId[];
-  savedBy: UserId[];
-  shares: number;
-  /** oculto por moderación: invisible en el feed, visible en /admin */
-  hidden?: boolean;
-}
-
-export interface CommentRow {
-  id: string;
-  postId: string;
-  authorId: UserId;
-  text: string;
-  createdAt: number;
-  likedBy: UserId[];
-  /** null = comentario raíz; un id = respuesta */
-  parentId?: string | null;
-  pinned?: boolean;
-}
+/*  Acá vivían `Post` y `CommentRow`, las filas del store en memoria.
+ *
+ *  Se fueron con `db.posts` y `db.comments`: ahora son `PostDoc` y `CommentDoc`
+ *  en `lib/firebase/schema.ts`. `PostMediaItem` se queda porque es lo que el
+ *  compositor le pasa a `publishPost` —el resultado de subir al bucket, antes de
+ *  que exista ningún documento— y no tiene por qué saber de Firestore.
+ *
+ *  Dos diferencias con lo que había, y las dos tienen su porqué escrito en el
+ *  schema: `savedBy` ya no está en la publicación sino en
+ *  `trapnexport-user/{uid}/saved`, y `hidden` dejó de ser opcional. */
 
 export interface Message {
   id: string;

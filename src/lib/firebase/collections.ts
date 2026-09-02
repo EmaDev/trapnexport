@@ -47,6 +47,16 @@ export const COL = {
   /** los videos del archivo. Ver `ClipDoc`. */
   clip: `${PREFIX}-clip`,
 
+  /* ── el feed (`lib/social/`) ────────────────────────────────────────────── */
+  /** publicaciones del feed y del foro. Ver `PostDoc`. */
+  post: `${PREFIX}-post`,
+  /** comentarios y respuestas. Colección de primer nivel y no subcolección de
+   *  la publicación: el feed necesita los comentarios de las 50 publicaciones
+   *  que muestra, y eso es una query con `in` sobre `postId`; con subcolecciones
+   *  serían 50 queries o un collection group con el mismo campo igual.
+   *  Ver `CommentDoc`. */
+  comment: `${PREFIX}-comment`,
+
   /** avisos de campanita: un documento por destinatario. Los escribe el
    *  servidor (`lib/social/notify.ts`) y los lee `social/queries.ts`. Ver
    *  `NotificacionDoc`. */
@@ -87,6 +97,13 @@ export const SUB_VOTO = "voto";
 export const SUB = {
   private: "private",
   gallery: "gallery",
+  /** publicaciones guardadas: un doc por publicación, con el id de la
+   *  publicación de id. Va del lado del usuario y no como array `savedBy` en la
+   *  publicación porque guardar es privado y no tiene contador visible: si
+   *  viviera en el post, guardar reescribiría el documento que todo el feed
+   *  está leyendo, y de paso le contaría a todos quién lo guardó.
+   *  Ver `GuardadoDoc`. */
+  saved: "saved",
 } as const;
 
 /** El único documento dentro de `private/`.

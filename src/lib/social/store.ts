@@ -1,6 +1,6 @@
-import type { CommentRow, Conversation, GalleryItem, Post } from "@/lib/social/types";
+import type { Conversation, GalleryItem } from "@/lib/social/types";
 
-/** Lo que todavía vive en memoria del módulo público: feed, comentarios y chat.
+/** Lo que todavía vive en memoria del módulo público: el chat y el carrete.
  *
  *  Vive en `globalThis` a propósito: en `next dev` cada recompilación descarta
  *  los módulos, y sin esto una publicación desaparecía al guardar un archivo.
@@ -8,26 +8,20 @@ import type { CommentRow, Conversation, GalleryItem, Post } from "@/lib/social/t
  *  de dónde salen los datos, así que migrar a Firestore es reescribir
  *  `queries.ts` y `actions.ts`, no las pantallas.
  *
- *  **Las cuentas ya no están acá.** Salen de `trapnexport-user` a través de
- *  `lib/social/directorio.ts`, y quién mira sale de la cookie de sesión
- *  (`lib/auth/sesion.ts`). Lo que había antes era el plantel de `JUGADORES`
- *  convertido en usuarios, indexado por el slug del jugador, más un
- *  `currentUserId` fijo en una cuenta: el feed se veía igual iniciara sesión
- *  quien iniciara.
+ *  **Ya se fueron de acá** las cuentas (`trapnexport-user`, vía
+ *  `lib/social/directorio.ts`), las publicaciones (`trapnexport-post`), los
+ *  comentarios (`trapnexport-comment`) y las notificaciones
+ *  (`trapnexport-notification`). Quién mira sale de la cookie de sesión.
  *
- *  Por eso todos los ids de este archivo —`authorId`, `likedBy`, `savedBy`,
- *  `fromId`, `participantIds`, las claves de `gallery`— son **uid de Firebase
- *  Auth**. Es el mismo id que devuelve la sesión y el mismo con el que se firma
- *  cada escritura. Cuando estas tres colecciones pasen a Firestore no hay que
- *  traducir nada.
+ *  Todos los ids de lo que queda —`fromId`, `participantIds`, las claves de
+ *  `gallery`— son **uid de Firebase Auth**: el mismo id que devuelve la sesión y
+ *  con el que se firma cada escritura. Cuando el chat y el carrete pasen a
+ *  Firestore no hay que traducir nada.
  *
  *  No hay datos de relleno: todo arranca vacío y se llena con lo que se hace en
- *  la app. Las notificaciones ya no viven acá: son documentos de Firestore
- *  (`trapnexport-notification`, ver `lib/social/notify.ts`).
+ *  la app.
  */
 export interface Db {
-  posts: Post[];
-  comments: CommentRow[];
   conversations: Conversation[];
   /** carrete personal por uid. Mapa y no campo del usuario porque el usuario ya
    *  no es un objeto de este store: es un documento de Firestore que no puede
@@ -38,8 +32,6 @@ export interface Db {
 const globalForDb = globalThis as unknown as { __socialDb?: Db };
 
 export const db: Db = (globalForDb.__socialDb ??= {
-  posts: [],
-  comments: [],
   conversations: [],
   gallery: {},
 });

@@ -217,25 +217,52 @@ escribiendo como la misma cuenta semilla no había nada que separar:
 Al terminar esta fase el store en memoria queda con `posts`, `comments`,
 `conversations` y el carrete.
 
-### Fase 3 — Publicaciones y comentarios
+### Fase 3 — Publicaciones y comentarios · **hecha**
 
-- **`PostDoc` y `CommentDoc` nuevos en `schema.ts`.** Es lo único del dominio
-  que ese archivo no tiene todavía (`UserDoc`, `GalleryDoc`,
-  `PushSubscriptionDoc` ya están escritos, esperando).
-- **`likedBy` sí como array, `savedBy` no.** Los likes se muestran contados y
-  se leen junto con el post; los guardados son privados, no tienen contador
-  visible y hacen que guardar reescriba el documento que todo el feed está
-  leyendo. `savedBy` va a `trapnexport-user/{uid}/saved/{postId}`.
-- Contadores de `UserStats` con `FieldValue.increment` en la misma transacción
-  que el alta, no recalculados: `firestore.rules` ya declara `stats` inmutable
-  para el dueño justamente para que el número signifique algo.
-- Índices nuevos: feed por `createdAt desc` filtrando `hidden`, comentarios por
-  `postId`.
-- Rules: `trapnexport-post` y `trapnexport-comment` con lectura pública
-  (el feed es público) y escritura sólo del servidor, igual que el contenido
-  del panel.
-- Al borrar un post, borrar también sus imágenes del bucket: `PostMediaItem.path`
-  existe exactamente para eso y hoy no lo usa nadie.
+- **`PostDoc`, `CommentDoc` y `GuardadoDoc`** en `schema.ts`; `trapnexport-post`
+  y `trapnexport-comment` en `COL`.
+- **`likedBy` sí como array, `savedBy` no**, como estaba previsto. Los likes se
+  cuentan y se muestran, así que se leen junto con la publicación; guardar es
+  privado y sin contador, y si viviera en el post cada "guardar" reescribiría el
+  documento que todo el feed está leyendo. Quedó en
+  `trapnexport-user/{uid}/saved/{postId}`, con el id de la publicación como id
+  del documento: guardar dos veces es idempotente.
+- **Los likes van con `arrayUnion`/`arrayRemove`**, no reescribiendo el array.
+  Dos personas dando like a la vez con la lista completa se pisan y uno de los
+  dos likes desaparece; estas dos las resuelve el servidor de Firestore sobre el
+  valor actual.
+- **`hidden` es obligatorio, no opcional.** El feed consulta
+  `where("hidden", "==", false)` y una query de igualdad **no devuelve** los
+  documentos a los que les falta el campo: con `hidden?` las publicaciones
+  nuevas no aparecerían nunca.
+- **`commentCount` desnormalizado** en la publicación. El feed muestra
+  "Comentarios (N)" en cada tarjeta y contarlos de verdad sería una query por
+  publicación en pantalla. Lo mueven `addComment` y `deleteComment` con
+  `increment`, en el mismo lote que el alta o la baja — separados, un error en
+  el medio dejaría el número mintiendo.
+- **Contadores de `UserStats` en el mismo lote**, igual.
+- **Los comentarios del feed salen en una query**, no en una por publicación:
+  `where("postId", "in", [...])` en tandas de 30, que es el tope de Firestore.
+- **`/admin` pasó a agregaciones.** Los contadores del panel recorrían el array
+  entero; en Firestore eso sería leer y pagar la colección completa cada vez que
+  alguien abre el panel. Ahora son `count()`, y el sparkline consulta sólo la
+  última semana.
+- **Al borrar una publicación se borran sus imágenes.** `PostMediaDoc.path`
+  existía desde que el compositor sube a Storage y no lo usaba nadie. Va con el
+  Admin SDK (`borrarDelBucket`, nuevo en `lib/firebase/admin.ts`) porque quien
+  aprieta el botón es el panel y no el dueño de los archivos, y va **después** de
+  borrar los documentos: al revés, un fallo en el medio dejaría una publicación
+  viva apuntando a fotos que ya no existen.
+- Rules: lectura pública y escritura cerrada al cliente. La escritura no se abre
+  al autor aunque "podría": ninguna de estas operaciones es un documento solo, y
+  `stats` es de sólo lectura para su dueño a propósito.
+- Índices nuevos: `hidden`+`createdAt`, `authorId`+`hidden`+`createdAt`,
+  `postId`+`createdAt`.
+
+**Lo que apareció:** `setPostHidden` y `deletePost` no exigían nada. Estaban en
+el archivo del feed y no en el del panel, así que se saltearon el
+`requireAdmin()` que tiene el resto de la moderación — cualquiera podía ocultar o
+borrar la publicación de cualquiera con un POST. Ahora lo exigen.
 
 ### Fase 4 — Avatares y carrete a Storage
 

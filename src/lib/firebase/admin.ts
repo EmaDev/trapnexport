@@ -1,5 +1,6 @@
 import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 /** Firebase del lado del **servidor**, con credenciales de servicio.
  *
@@ -20,12 +21,17 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
  *  dice qué falta.
  */
 
-let cached: { app: App; db: Firestore } | undefined;
+let cached: { app: App; db: Firestore; bucket?: string } | undefined;
 
 function init() {
   const projectId = process.env.FIREBASE_ADMIN_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY;
+  /*  El mismo bucket que usa el navegador: no hay dos. Va por separado y no en
+   *  `initializeApp` porque es la única pieza que puede faltar sin romper nada
+   *  —Firestore anda igual— y porque las credenciales de admin y el bucket
+   *  vienen de variables distintas. */
+  const bucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
 
   if (!projectId || !clientEmail || !privateKey) {
     throw new Error(
@@ -46,9 +52,32 @@ function init() {
       }),
     });
 
-  cached = { app, db: getFirestore(app) };
+  cached = { app, db: getFirestore(app), bucket };
   return cached;
 }
 
 export const adminApp = () => (cached ?? init()).app;
 export const adminDb = () => (cached ?? init()).db;
+
+/** Borra un archivo del bucket desde el servidor. Best-effort.
+ *
+ *  Existe para un caso que el navegador no puede cubrir: cuando el panel borra
+ *  una publicación ajena, hay que borrar también sus imágenes, y el que aprieta
+ *  el botón no es el dueño de los archivos. `lib/storage/imagen.ts` hace lo
+ *  mismo del lado del cliente para las subidas propias.
+ *
+ *  No tira nunca. Un archivo que ya no está, un `path` de una tanda vieja que
+ *  nunca existió o un bucket sin configurar no pueden frenar el borrado del
+ *  documento: el resultado sería una publicación que no se puede eliminar
+ *  porque su foto ya no está, que es exactamente al revés de lo que se quiere.
+ *  El costo de fallar es un huérfano en el bucket.
+ */
+export async function borrarDelBucket(path: string): Promise<void> {
+  try {
+    const { app, bucket } = cached ?? init();
+    if (!bucket || !path) return;
+    await getStorage(app).bucket(bucket).file(path).delete();
+  } catch {
+    /* ya no existe, o no se pudo: se ignora a propósito */
+  }
+}
