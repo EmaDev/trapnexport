@@ -10,44 +10,23 @@ export type UserId = string;
 
 export type ClaimStatus = "pending" | "approved" | "rejected";
 
-/** Alguien se registró diciendo "soy este jugador del plantel" y falta que el
- *  admin confirme que es quien dice ser. Vive en el `User` del jugador
- *  reclamado, no en una tabla aparte: la cuenta y el reclamo son la misma
- *  fila hasta que se apruebe o se rechace. */
-export interface TeamClaim {
-  /** lo que la persona escribió para que el admin la reconozca */
-  note?: string;
-  status: ClaimStatus;
-  requestedAt: number;
-  reviewedAt?: number;
-}
-
-/** Resultado de las escrituras de registro (`registerFan`, `claimPlayerAccount`
- *  en `actions.ts`). Vive acá y no en `actions.ts` porque un archivo
- *  `"use server"` sólo puede exportar funciones async. */
+/** Resultado de las escrituras de registro (`registerFan`, `claimPlayer` en
+ *  `lib/auth/register.ts`). Vive acá y no ahí porque un archivo `"use server"`
+ *  sólo puede exportar funciones async. */
 export type RegisterResult = { ok: true } | { ok: false; error: string };
 
-export interface User {
-  id: UserId;
-  name: string;
-  handle: string;
-  avatar: string;
-  bio?: string;
-  verified?: boolean;
-  /** el admin puede suspender una cuenta: deja de aparecer en el feed público */
-  suspended?: boolean;
-  joinedAt: number;
-  /** uid de Firebase Auth vinculado a esta cuenta, una vez que alguien se
-   *  registra con este `id`. Sin esto, la cuenta existe (viene de `JUGADORES`)
-   *  pero nadie la reclamó todavía. */
-  authUid?: string;
-  /** presente sólo en cuentas del plantel reclamadas por alguien */
-  claim?: TeamClaim;
-  /** datos deportivos, editables desde `/perfil` */
-  ficha?: PlayerFicha;
-  /** carrete propio: fotos y videos subidos sin publicar en el feed */
-  gallery?: GalleryItem[];
-}
+/*  Acá vivían `User` y `TeamClaim`, la cuenta del store en memoria.
+ *
+ *  Se fueron con `db.users`: la cuenta ahora es `UserDoc` en
+ *  `lib/firebase/schema.ts` —un documento de Firestore cuyo id es el uid de
+ *  Firebase Auth— y el reclamo del plantel es `UserClaimDoc`. Para leerlas
+ *  desde el módulo social está `lib/social/directorio.ts`, que las devuelve
+ *  como `Cuenta`.
+ *
+ *  Tener las dos formas conviviendo era una trampa: dos tipos llamados casi
+ *  igual, con el mismo campo `id` significando cosas distintas —el slug del
+ *  jugador en uno, el uid en el otro— y nada que impidiera pasar uno donde iba
+ *  el otro. */
 
 /* ── ficha del jugador ───────────────────────────────────────────────────── */
 

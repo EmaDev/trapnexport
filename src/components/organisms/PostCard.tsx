@@ -39,7 +39,10 @@ export function PostCard({
   mode = "feed",
 }: {
   post: PostVM;
-  session: SessionVM;
+  /** `null` sin sesión: la publicación se lee igual —está hecha para
+   *  compartirse por link— y lo que cambia es la caja de comentarios, que en vez
+   *  de escribir manda a `/login`. */
+  session: SessionVM | null;
   onShare: (post: PostVM) => void;
   mode?: "feed" | "detail";
 }) {
@@ -89,11 +92,22 @@ export function PostCard({
       >
         <CommentBox
           comments={post.comments}
-          currentUser={{ name: session.name, avatar: session.avatar }}
-          onSubmit={(text, parentId) => addComment(post.id, text, parentId)}
+          // `currentUser` es opcional en la librería: sin sesión la caja se
+          // dibuja sin avatar en vez de con el de nadie.
+          currentUser={session ? { name: session.name, avatar: session.avatar } : undefined}
+          onSubmit={(text, parentId) => {
+            // Comentar sin cuenta no falla en silencio: la Server Action lo
+            // rechazaría igual (lee el uid de la cookie), pero recién después de
+            // que la persona escribió el comentario entero.
+            if (!session) {
+              router.push(`/login?next=/post/${post.id}`);
+              return;
+            }
+            return addComment(post.id, text, parentId);
+          }}
           onLike={(id, isLiked) => void toggleCommentLike(id, isLiked)}
           onDelete={
-            detail
+            detail && session
               ? (id) => {
                   const removed = post.comments.find((c) => c.id === id);
                   void deleteComment(id);

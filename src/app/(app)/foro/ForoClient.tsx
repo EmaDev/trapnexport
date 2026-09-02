@@ -93,10 +93,13 @@ export function ForoClient({ posts }: { posts: PostVM[] }) {
           hay nav, que es el caso de ≥md): sin esto el FAB queda tapado por la
           barra en mobile y flotando de más en desktop. Va con `!` porque el
           componente trae su propio `bottom` en la misma clase. */}
+      {/* Sin sesión el FAB no abre el compositor: manda a entrar. Se muestra
+          igual —esconderlo dejaría al visitante sin saber que se puede
+          publicar— y `next` lo trae de vuelta acá después del login. */}
       <FloatingButton
         label="Nuevo posteo"
         icon={<PlusIcon />}
-        onClick={() => setComponiendo(true)}
+        onClick={() => (session ? setComponiendo(true) : router.push("/login?next=/foro"))}
         className="!bottom-[calc(var(--bottom-nav)+1rem)]"
       />
 
@@ -107,7 +110,11 @@ export function ForoClient({ posts }: { posts: PostVM[] }) {
         description="Lo ve toda la comunidad"
         showClose
       >
-        <PostComposer session={session} onPublished={() => setComponiendo(false)} />
+        {/* El FAB ya no abre esta hoja sin sesión; el guardo igual porque el
+            estado `componiendo` podría quedar abierto si la sesión se cae. */}
+        {session && (
+          <PostComposer session={session} onPublished={() => setComponiendo(false)} />
+        )}
       </BottomSheet>
 
       <ComoInstalarSheet open={verInstalar} onClose={() => setVerInstalar(false)} />

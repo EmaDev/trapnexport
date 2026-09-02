@@ -25,7 +25,13 @@ export interface AppShellContextValue {
   items: AppNotification[];
   unread: number;
   open: () => void;
-  session: SessionVM;
+  /** quién mira, o `null` si nadie inició sesión.
+   *
+   *  `null` es un estado normal y no un error: el feed, un perfil y una
+   *  publicación se ven sin cuenta porque están hechos para compartirse por
+   *  link. Lo que cambia es que no se dibujan los controles que escriben — el
+   *  compositor no aparece y la caja de comentarios manda a `/login`. */
+  session: SessionVM | null;
   /** conversaciones con el último mensaje sin leer */
   unreadChats: number;
 }
@@ -38,5 +44,6 @@ export function useNotifications(): AppShellContextValue {
   return ctx;
 }
 
-/** Atajo para las pantallas que sólo quieren saber quién está logueado. */
-export const useSession = (): SessionVM => useNotifications().session;
+/** Atajo para las pantallas que sólo quieren saber quién está logueado.
+ *  Devuelve `null` sin sesión: ver `session` arriba. */
+export const useSession = (): SessionVM | null => useNotifications().session;

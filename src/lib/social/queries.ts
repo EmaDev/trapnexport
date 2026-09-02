@@ -1,15 +1,22 @@
+import { getCurrentUid } from "@/lib/auth/sesion";
 import { adminDb } from "@/lib/firebase/admin";
 import { COL } from "@/lib/firebase/collections";
 import type { NotificacionDoc } from "@/lib/firebase/schema";
+import { getDirectorio, type Directorio } from "@/lib/social/directorio";
 import { db } from "@/lib/social/store";
-import type { GalleryItem, NotificationKind, PlayerFicha, User } from "@/lib/social/types";
+import type { GalleryItem, NotificationKind, PlayerFicha } from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
 
 /** Lecturas del dominio, ya mapeadas a lo que esperan los componentes.
  *
  *  Las pantallas nunca tocan `db` ni arman props a mano: piden acá y reciben
- *  un view-model. Cuando `store.ts` pase a Firestore, sólo cambia el cuerpo de
- *  estas funciones — las firmas y los tipos de salida se mantienen.
+ *  un view-model.
+ *
+ *  Las **cuentas** ya salen de Firestore (`lib/social/directorio.ts`) y quién
+ *  mira sale de la cookie de sesión (`lib/auth/sesion.ts`). Lo que todavía vive
+ *  en el store en memoria son las publicaciones, los comentarios y el chat —y
+ *  sus `authorId`, `likedBy` y `participantIds` ya guardan uid, no slugs, así
+ *  que migrarlos a Firestore es cambiar de dónde se leen y nada más.
  *
  *  Todo lo de este archivo corre en el servidor (Server Components y Server
  *  Actions). Es la mitad "read" del par read/write con `actions.ts`.
@@ -54,6 +61,7 @@ export interface PostVM {
 }
 
 export interface SessionVM {
+  /** uid de Firebase Auth */
   id: string;
   name: string;
   handle: string;
@@ -61,7 +69,12 @@ export interface SessionVM {
 }
 
 export interface ProfileVM {
+  /** uid de Firebase Auth */
   id: string;
+  /** slug en `trapnexport-jugador`, si esta cuenta es del plantel. Es el puente
+   *  hacia la historia del club y hacia `JUGADORES`, que se indexan por jugador
+   *  y no por cuenta. */
+  playerId?: string;
   name: string;
   handle: string;
   avatar: string;
@@ -108,10 +121,13 @@ export interface NotificationVM {
 
 /* ── helpers internos ────────────────────────────────────────────────────── */
 
-const userById = (id: string): User | undefined => db.users.find((u) => u.id === id);
-
-const authorOf = (id: string): AuthorVM => {
-  const u = userById(id);
+/** El autor de algo, para la UI.
+ *
+ *  Nunca falla: una cuenta borrada deja publicaciones y comentarios que igual
+ *  hay que dibujar. Antes esto podía pasar sólo en teoría (las cuentas eran
+ *  semilla y no se borraban); ahora el panel las borra de verdad. */
+const authorOf = (uid: string, dir: Directorio): AuthorVM => {
+  const u = dir.byId(uid);
   return {
     name: u?.name ?? "Cuenta eliminada",
     handle: u?.handle ?? "desconocido",
@@ -120,12 +136,12 @@ const authorOf = (id: string): AuthorVM => {
   };
 };
 
-const commentsOf = (postId: string, viewerId: string): CommentVM[] =>
+const commentsOf = (postId: string, viewerId: string | null, dir: Directorio): CommentVM[] =>
   db.comments
     .filter((c) => c.postId === postId)
     .sort((a, b) => a.createdAt - b.createdAt)
     .map((c) => {
-      const author = userById(c.authorId);
+      const author = dir.byId(c.authorId);
       return {
         id: c.id,
         author: author?.name ?? "Cuenta eliminada",
@@ -133,99 +149,135 @@ const commentsOf = (postId: string, viewerId: string): CommentVM[] =>
         text: c.text,
         at: c.createdAt,
         likes: c.likedBy.length,
-        liked: c.likedBy.includes(viewerId),
+        // Sin sesión nada figura como propio: un visitante no likeó nada.
+        liked: viewerId ? c.likedBy.includes(viewerId) : false,
         parentId: c.parentId ?? null,
         pinned: c.pinned,
         authorBadge: author?.verified ? "Verificado" : undefined,
       };
     });
 
-const toPostVM = (postId: string, viewerId: string): PostVM | null => {
+const toPostVM = (postId: string, viewerId: string | null, dir: Directorio): PostVM | null => {
   const p = db.posts.find((x) => x.id === postId);
   if (!p) return null;
 
-  const comments = commentsOf(p.id, viewerId);
+  const comments = commentsOf(p.id, viewerId, dir);
   return {
     id: p.id,
-    author: authorOf(p.authorId),
+    author: authorOf(p.authorId, dir),
     time: relativeTime(p.createdAt),
     createdAt: p.createdAt,
     text: p.text,
     media: p.media,
     counts: { likes: p.likedBy.length, comments: comments.length, shares: p.shares },
-    liked: p.likedBy.includes(viewerId),
-    saved: p.savedBy.includes(viewerId),
-    likedBy: p.likedBy.map((id) => userById(id)?.name.split(" ")[0] ?? "Alguien").slice(0, 3),
+    liked: viewerId ? p.likedBy.includes(viewerId) : false,
+    saved: viewerId ? p.savedBy.includes(viewerId) : false,
+    likedBy: p.likedBy.map((id) => dir.byId(id)?.name.split(" ")[0] ?? "Alguien").slice(0, 3),
     comments,
   };
 };
 
+/** Los uid de las cuentas suspendidas: no se muestran ni sus publicaciones. */
+const suspendidas = (dir: Directorio) =>
+  new Set(dir.todas().filter((u) => u.suspended).map((u) => u.id));
+
 /* ── sesión ──────────────────────────────────────────────────────────────── */
 
-/** Quién está mirando la app pública.
+/** Quién está mirando la app pública, o `null` si nadie inició sesión.
  *
- *  Hoy devuelve el usuario semilla. Cuando entre Firebase Auth, esto lee el
- *  token de sesión y resuelve el usuario real; ninguna pantalla cambia. */
-export async function getSession(): Promise<SessionVM> {
-  const me = userById(db.currentUserId)!;
+ *  Devuelve `null` y no una cuenta semilla: el feed, un perfil y una publicación
+ *  se ven sin cuenta —están hechos para compartirse por link— y lo único que
+ *  cambia sin sesión es que no aparecen los controles que escriben.
+ *
+ *  También devuelve `null` con sesión abierta pero sin perfil todavía: es una
+ *  cuenta a medio crear, la que está por pasar por `/completar-perfil`.
+ */
+export async function getSession(): Promise<SessionVM | null> {
+  const uid = await getCurrentUid();
+  if (!uid) return null;
+
+  const me = (await getDirectorio()).byId(uid);
+  if (!me) return null;
+
   return { id: me.id, name: me.name, handle: me.handle, avatar: me.avatar };
 }
 
 /* ── feed y posts ────────────────────────────────────────────────────────── */
 
 export async function getFeed(): Promise<PostVM[]> {
-  const viewerId = db.currentUserId;
-  const suspended = new Set(db.users.filter((u) => u.suspended).map((u) => u.id));
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  const ocultas = suspendidas(dir);
 
   return db.posts
-    .filter((p) => !p.hidden && !suspended.has(p.authorId))
+    .filter((p) => !p.hidden && !ocultas.has(p.authorId))
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => toPostVM(p.id, viewerId)!)
+    .map((p) => toPostVM(p.id, viewerId, dir)!)
     .filter(Boolean);
 }
 
 export async function getPost(id: string): Promise<PostVM | null> {
   const p = db.posts.find((x) => x.id === id);
   if (!p || p.hidden) return null;
-  return toPostVM(id, db.currentUserId);
+
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  return toPostVM(id, viewerId, dir);
 }
 
 export async function getPostsByHandle(handle: string): Promise<PostVM[]> {
-  const user = db.users.find((u) => u.handle === handle);
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  const user = dir.byHandle(handle);
   if (!user) return [];
 
   return db.posts
     .filter((p) => p.authorId === user.id && !p.hidden)
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map((p) => toPostVM(p.id, db.currentUserId)!);
+    .map((p) => toPostVM(p.id, viewerId, dir)!);
 }
 
 /* ── perfiles ────────────────────────────────────────────────────────────── */
 
+/** El carrete de una cuenta.
+ *
+ *  Todavía en memoria, y ahora en un mapa por uid en vez de colgado del `User`
+ *  —que ya no existe—. La subcolección `trapnexport-user/{uid}/gallery` está
+ *  definida en el schema (`GalleryDoc`) pero se llena en la Fase 4, junto con la
+ *  subida a Storage: hoy los items son data-URIs y no pueden entrar a un
+ *  documento de Firestore, que tiene tope de 1 MB. */
+const galeriaDe = (uid: string): GalleryItem[] => db.gallery[uid] ?? [];
+
 export async function getProfile(handle: string): Promise<ProfileVM | null> {
-  const u = db.users.find((x) => x.handle === handle);
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  const u = dir.byHandle(handle);
   if (!u || u.suspended) return null;
 
   return {
     id: u.id,
+    playerId: u.playerId,
     name: u.name,
     handle: u.handle,
     avatar: u.avatar,
     bio: u.bio,
     verified: u.verified,
     joined: shortDate(u.joinedAt),
-    isMe: u.id === db.currentUserId,
+    isMe: u.id === viewerId,
     stats: {
       posts: db.posts.filter((p) => p.authorId === u.id && !p.hidden).length,
     },
-    ficha: u.ficha ?? {},
-    gallery: [...(u.gallery ?? [])].sort((a, b) => b.addedAt - a.addedAt),
+    ficha: u.ficha,
+    gallery: [...galeriaDe(u.id)].sort((a, b) => b.addedAt - a.addedAt),
   };
 }
 
-export async function getMyProfile(): Promise<ProfileVM> {
-  const me = userById(db.currentUserId)!;
-  return (await getProfile(me.handle))!;
+/** El perfil propio, o `null` si no hay sesión.
+ *
+ *  `null` es un caso real y no un error: `/perfil` es una pantalla del shell y
+ *  se puede llegar por la barra de abajo sin haber entrado nunca. Quien la
+ *  recibe decide si manda a `/login` o muestra el cartel de "entrá o
+ *  registrate". */
+export async function getMyProfile(): Promise<ProfileVM | null> {
+  const session = await getSession();
+  if (!session) return null;
+  return getProfile(session.handle);
 }
 
 export interface SearchIndex {
@@ -243,11 +295,13 @@ export interface SearchIndex {
  *  Las cuentas suspendidas no entran: si el feed no las muestra, el buscador
  *  tampoco puede ser la puerta de atrás. */
 export async function getSearchIndex(): Promise<SearchIndex> {
-  const viewerId = db.currentUserId;
-  const suspended = new Set(db.users.filter((u) => u.suspended).map((u) => u.id));
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  const ocultas = suspendidas(dir);
 
   return {
-    accounts: db.users
+    accounts: dir
+      .todas()
+      // Uno mismo no se busca. Sin sesión no se excluye a nadie.
       .filter((u) => !u.suspended && u.id !== viewerId)
       .map((u) => ({
         id: u.id,
@@ -259,12 +313,12 @@ export async function getSearchIndex(): Promise<SearchIndex> {
       })),
 
     posts: db.posts
-      .filter((p) => !p.hidden && !suspended.has(p.authorId))
+      .filter((p) => !p.hidden && !ocultas.has(p.authorId))
       .sort((a, b) => b.createdAt - a.createdAt)
       .map((p) => ({
         id: p.id,
         text: p.text,
-        author: authorOf(p.authorId).name,
+        author: authorOf(p.authorId, dir).name,
         time: relativeTime(p.createdAt),
       })),
   };
@@ -273,15 +327,18 @@ export async function getSearchIndex(): Promise<SearchIndex> {
 /* ── chat ────────────────────────────────────────────────────────────────── */
 
 export async function getConversations(): Promise<ConversationVM[]> {
-  const viewerId = db.currentUserId;
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  // Sin sesión no hay bandeja: las conversaciones son de a dos y hay que ser uno.
+  if (!viewerId) return [];
 
   return db.conversations
+    .filter((c) => c.participantIds.includes(viewerId))
     .map((c) => {
       const peerId = c.participantIds.find((id) => id !== viewerId)!;
       const last = c.messages[c.messages.length - 1];
       return {
         id: c.id,
-        peer: authorOf(peerId),
+        peer: authorOf(peerId, dir),
         lastMessage: last?.text ?? "",
         lastAt: last?.at ?? 0,
         time: last ? relativeTime(last.at) : "",
@@ -300,15 +357,19 @@ export async function getUnreadChats(): Promise<number> {
 export async function getConversation(
   id: string,
 ): Promise<{ id: string; peer: AuthorVM; messages: MessageVM[] } | null> {
-  const c = db.conversations.find((x) => x.id === id);
-  if (!c) return null;
+  const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
+  if (!viewerId) return null;
 
-  const viewerId = db.currentUserId;
+  const c = db.conversations.find((x) => x.id === id);
+  // Ser participante no es un detalle de presentación: sin este corte,
+  // cualquiera con el id lee la conversación de otros dos.
+  if (!c || !c.participantIds.includes(viewerId)) return null;
+
   const peerId = c.participantIds.find((p) => p !== viewerId)!;
 
   return {
     id: c.id,
-    peer: authorOf(peerId),
+    peer: authorOf(peerId, dir),
     // `Chatbot` modela la conversación como user/bot: "bot" es el otro participante
     messages: c.messages.map((m) => ({
       id: m.id,
@@ -339,16 +400,22 @@ const NOTIF_META: Record<
 };
 
 export async function getNotifications(): Promise<NotificationVM[]> {
-  const viewerId = db.currentUserId;
+  const viewerId = await getCurrentUid();
+  // Los avisos son de alguien: sin sesión la campana está vacía, no llena de
+  // los de otro.
+  if (!viewerId) return [];
 
-  const snap = await adminDb()
-    .collection(COL.notificacion)
-    .where("userId", "==", viewerId)
-    .orderBy("createdAt", "desc")
-    // El historial no es infinito: la pantalla y el drawer muestran los más
-    // nuevos, y nadie baja cien avisos.
-    .limit(100)
-    .get();
+  const [snap, dir] = await Promise.all([
+    adminDb()
+      .collection(COL.notificacion)
+      .where("userId", "==", viewerId)
+      .orderBy("createdAt", "desc")
+      // El historial no es infinito: la pantalla y el drawer muestran los más
+      // nuevos, y nadie baja cien avisos.
+      .limit(100)
+      .get(),
+    getDirectorio(),
+  ]);
 
   return snap.docs.map((d) => {
     const n = d.data() as NotificacionDoc;
@@ -360,7 +427,7 @@ export async function getNotifications(): Promise<NotificationVM[]> {
       date: n.createdAt?.toMillis() ?? Date.now(),
       read: !!n.read,
       // Los avisos de plataforma no tienen actor: ahí manda el `tone`.
-      avatar: n.actorId ? userById(n.actorId)?.avatar : undefined,
+      avatar: n.actorId ? dir.byId(n.actorId)?.avatar : undefined,
       href: n.href,
       tone: meta.tone,
     };
@@ -392,6 +459,7 @@ export interface AdminStats {
 }
 
 export async function getAdminStats(): Promise<AdminStats> {
+  const dir = await getDirectorio();
   const day = 86_400_000;
   const today = new Date().setHours(23, 59, 59, 999);
 
@@ -401,9 +469,11 @@ export async function getAdminStats(): Promise<AdminStats> {
     return db.posts.filter((p) => p.createdAt > from && p.createdAt <= to).length;
   });
 
+  const cuentas = dir.todas();
+
   return {
-    usuarios: db.users.length,
-    suspendidos: db.users.filter((u) => u.suspended).length,
+    usuarios: cuentas.length,
+    suspendidos: cuentas.filter((u) => u.suspended).length,
     posts: db.posts.length,
     ocultos: db.posts.filter((p) => p.hidden).length,
     comentarios: db.comments.length,
@@ -412,9 +482,11 @@ export async function getAdminStats(): Promise<AdminStats> {
 }
 
 export async function getAdminPosts(): Promise<AdminPostRow[]> {
+  const dir = await getDirectorio();
+
   return db.posts
     .map((p) => {
-      const author = userById(p.authorId);
+      const author = dir.byId(p.authorId);
       return {
         id: p.id,
         autor: author?.name ?? "Cuenta eliminada",

@@ -83,7 +83,9 @@ export function AppShell({
   unreadChats,
 }: {
   children: React.ReactNode;
-  session: SessionVM;
+  /** `null` cuando nadie inició sesión: el shell se dibuja igual, sin los
+   *  controles que escriben. Ver `notifications-context.tsx`. */
+  session: SessionVM | null;
   notifications: NotificationVM[];
   unreadChats: number;
 }) {

@@ -60,12 +60,16 @@ import { useNotifications } from "../notifications-context";
  *  y sin saber quién sos no hay nada honesto que poner: queda el cartel para
  *  entrar o registrarse y se acabó.
  *
- *  ⚠️ El corte es del lado del cliente (`useAuth`), como el gate de votar en
- *  `FeedTabs`: el servidor todavía no sabe quién mira —`getMyProfile()` lee
- *  `db.currentUserId`, la cuenta semilla— así que los datos igual viajan en la
- *  carga inicial aunque no se dibujen. Se cierra de verdad el día que la
- *  sesión sea una cookie que el servidor pueda leer; hasta entonces esto es
- *  una pantalla que no muestra, no un permiso que no da.
+ *  El corte lo hace **el servidor**: `page.tsx` redirige a `/login` cuando
+ *  `getMyProfile()` devuelve `null`, así que sin sesión acá no llega ni la
+ *  pantalla ni los datos. Antes era un gate de cliente (`useAuth`) y no podía
+ *  ser otra cosa: `getMyProfile()` leía una cuenta semilla fija, el servidor no
+ *  sabía quién miraba, y los datos viajaban igual aunque no se dibujaran — era
+ *  una pantalla que no mostraba, no un permiso que no daba. Con la sesión en una
+ *  cookie que el servidor lee, ya es un permiso.
+ *
+ *  El gate de cliente que queda es para el tipo, no para la seguridad: la
+ *  sesión llega por contexto y el contexto no sabe del redirect de arriba.
  */
 export function PerfilClient({
   profile,
@@ -274,10 +278,17 @@ export function PerfilClient({
 
         <PersonalMediaUploader items={profile.gallery} />
 
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
-          Publicar
-        </h2>
-        <PostComposer session={session} />
+        {/* `/perfil` redirige a `/login` sin sesión, así que acá siempre hay
+            una. El guardo es para el tipo: la sesión llega por contexto y el
+            contexto no sabe del redirect del Server Component. */}
+        {session && (
+          <>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+              Publicar
+            </h2>
+            <PostComposer session={session} />
+          </>
+        )}
 
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
           Tus publicaciones
