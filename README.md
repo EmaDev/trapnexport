@@ -98,6 +98,7 @@ src/app/
     encuestas/page.tsx          /admin/encuestas       ABM · borrador→abierta→cerrada
     invitaciones/page.tsx       /admin/invitaciones    ABM · genera el link y la tarjeta
     cronograma/page.tsx         /admin/cronograma      ABM · calendario + lista
+    historia/page.tsx           /admin/historia        Las 7 secciones de /historia, en solapas
     usuarios/page.tsx           /admin/usuarios        DataTable · suspender/reactivar
     publicaciones/page.tsx      /admin/publicaciones   DataTable · ocultar/borrar
     reportes/page.tsx           /admin/reportes        DataTable · revisar/descartar
@@ -120,7 +121,12 @@ src/lib/social/store.ts     Feed/comentarios/chat en memoria. Sin datos de relle
 src/lib/social/queries.ts   Lecturas, ya mapeadas a los props de los componentes.
 src/lib/social/actions.ts   Escrituras como Server Actions, con revalidatePath.
 src/lib/social/notify.ts    Alta de avisos de campanita → Firestore (trapnexport-notification).
-src/lib/historia.ts         Historia del club: contenido editorial, fuera del dominio social.
+
+src/lib/historia/types.ts      Modelo de la historia del club (ClubIdentity, Era, Season, Player…). Tipos puros: los importa también el cliente.
+src/lib/historia/seed.ts       La historia de arranque, tal como estaba escrita a mano. Hoy es semilla y fallback, no la fuente de verdad.
+src/lib/historia/queries.ts    Lecturas de Firestore (Admin SDK), con fallback a la semilla por colección.
+src/lib/historia/actions.ts    Escrituras como Server Actions, cada una con requireAdmin().
+src/lib/historia/index.ts      Barrel client-safe: tipos + constantes. NO reexporta queries/actions.
 
 src/lib/contenido/types.ts     Modelo del contenido del panel + etiquetas compartidas.
 src/lib/contenido/store.ts     Generadores de id/código. El resto migró a Firestore.
@@ -136,6 +142,25 @@ Components, escrituras en Server Actions detrás de `requireAdmin()`— así que
 seed:contenido` carga **sólo** las encuestas de los Trap Awards (idempotente: no
 pisa votos); noticias, invitaciones y el día del cronograma nacen vacíos y se
 cargan desde `/admin` (el cronograma cae a "hoy" hasta que se elija fecha).
+
+`historia/` también está sobre Firestore, en siete colecciones:
+`trapnexport-historia/club` (identidad + palmarés + balance, una sola fila),
+`-era`, `-temporada` (el id **es** el año, que es la URL), `-historia-jugador`
+(el id es el slug, que es el `?jugador=` compartible), `-frase`, `-foto` y
+`-clip`. Todo se edita en `/admin/historia`.
+
+No tiene script de seed y no le hace falta: mientras una colección está vacía,
+`historia/queries.ts` sirve `historia/seed.ts`, así que la app cuenta la
+historia completa en un proyecto de Firebase recién creado. La primera
+escritura sobre una sección la siembra sola (`sembrarSeccion`), y el botón
+"Importar contenido actual" del panel hace las siete de una vez. Es idempotente
+en los dos caminos: una colección con algo adentro no se toca.
+
+Las imágenes van a Firebase Storage, a `trapnexport-historia/`
+(`lib/storage/historia-image.ts`, mismo motor que las fotos del feed). El
+selector del panel acepta subir un archivo **o** pegar una URL: lo segundo es lo
+que deja conservar los data-URI generados de `lib/media.ts` sin tener que
+reemplazar cien imágenes de relleno antes de corregir un epígrafe.
 
 `contenido/` es un módulo aparte de `social/` y no una carpeta más adentro: son
 dos ciclos de vida distintos. `social/` lo escriben los usuarios y el panel sólo
@@ -337,9 +362,8 @@ publica `BottomNav` (`0px` en ≥`md`, donde no hay barra).
 
 `/historia` es la pantalla más larga de la app y la única puramente editorial.
 Cuenta la trayectoria de **Trap N Export**, el club que le da nombre a la app
-—el resto del contenido es de relleno e inventado; para renombrar el club
-alcanza con tocar `CLUB` en `src/lib/historia.ts`— en siete secciones de scroll, con una fila de chips
-arriba que salta a cada una:
+—el resto del contenido es de relleno e inventado— en siete secciones de
+scroll, con una fila de chips arriba que salta a cada una:
 
 | Sección | Qué es | Con qué |
 |---|---|---|
@@ -371,9 +395,16 @@ de la red social, y esas rutas darían 404. El link correcto es a su ficha.
 
 Y los OpenGraph de `/historia` y `/historia/:año` son las dos únicas rutas sin
 el sufijo ` · ${APP_NAME}`: el club se llama igual que la app, y "Historia de
-Trap N Export · Trap N Export" es el mismo nombre dos veces en el preview.
+Trap N Export · Trap N Export" es el mismo nombre dos veces en el preview. Las
+dos van por `generateMetadata` y no por un `metadata` constante, porque el
+nombre del club se edita en el panel: un objeto estático lo congelaría en lo que
+decía el día del build.
 
-## El panel: dashboard y los cuatro ABM
+Las siete secciones se editan enteras desde `/admin/historia` —incluidas las
+imágenes, que suben a Firebase Storage—. Ver "Capa de datos" arriba para las
+colecciones y el fallback a la semilla.
+
+## El panel: dashboard y los ABM
 
 `/admin` arranca con los **usuarios registrados** —el número grande, en su
 propia card— y una grilla de cuatro **accesos rápidos**, uno por sección de
@@ -387,10 +418,14 @@ viene del cronograma y los reportes sin resolver.
 | `/admin/encuestas` | pregunta, opciones, única/múltiple, cierre | editar una encuesta abierta **conserva** los votos de las opciones cuyo texto no cambió (el match es por texto, no por posición); de "cerrada" no se vuelve |
 | `/admin/invitaciones` | invitado, evento, mensaje, fecha, hora, lugar, plantilla | crear **es** generar el link; el `code` no cambia al editar (puede estar mandado) y revocar apaga la ruta pública sin borrar la fila |
 | `/admin/cronograma` | nombre, descripción, fecha, hora, duración, lugar, tipo | dos vistas de lo mismo: calendario para ver qué se pisa, lista para editar. Tocar un día vacío abre el alta con esa fecha |
+| `/admin/historia` | las siete secciones de `/historia`, en solapas: club, etapas, temporadas, jugadores, frases, museo, video | "Club" no es un ABM sino la única fila que existe, así que va como formulario abierto. El año de una temporada **es** su URL: cambiarlo mueve el documento. El id de un jugador sale del nombre la primera vez y después queda fijo, porque es el `?jugador=` compartible y el `playerId` del salón de cada temporada |
 
-Los cuatro comparten `src/app/admin/Dialogs.tsx` (`FormModal`, `ConfirmDialog`,
+Los cinco comparten `src/app/admin/Dialogs.tsx` (`FormModal`, `ConfirmDialog`,
 `EstadoPill`, `RowMenu`). No es una abstracción de CRUD —cada sección arma su
-formulario— sino los envoltorios que, escritos cuatro veces, se desincronizan.
+formulario— sino los envoltorios que, escritos cinco veces, se desincronizan.
+`/admin/historia` suma los suyos en `historia/campos.tsx` (`ImageField`,
+`ListaEditor`, `ParesEditor`) y `historia/medios.tsx` (fotos, clips y la frase
+de cierre, que la ficha de un jugador y la página de una temporada comparten).
 
 Alta y modificación son **la misma acción**: `saveX` sin `id` inserta, con `id`
 actualiza. Los tipos de entrada viven en `types.ts` y no en `actions.ts` porque
@@ -407,9 +442,9 @@ con el shell público traería `BottomNav`, splash e instalador. Va `noindex`.
 `InvitationCard` (`src/components/organisms/InvitationCard.tsx`) se renderiza en
 dos lugares con el mismo código: la ruta pública y la vista previa en vivo del
 formulario. Por eso no lleva `"use client"` ni estado, y el club llega **por
-prop** en vez de importar `CLUB` de `lib/historia` — ese módulo son 1400 líneas
-de contenido editorial y el import se las llevaría al bundle del panel para usar
-dos campos.
+prop** en vez de leerlo por su cuenta: la identidad del club sale de Firestore
+con el Admin SDK, que sólo corre en el servidor, y de todo el documento acá se
+usan dos campos.
 
 ### Límites de la librería que hay que conocer antes de tocar estas pantallas
 
@@ -491,9 +526,17 @@ escudo real.
 
 ## Qué falta
 
-- Auth real (Firebase) en `/` y en `/admin`.
-- Persistencia (Firestore) en lugar del store en memoria.
-- Subida de imágenes: hoy la media son placeholders generados.
-- Mensajería de verdad (grupos, lecturas, tiempo real).
+Está en [`PLAN.md`](PLAN.md), por fases y en orden. El resumen:
+
+- El módulo social (publicaciones, comentarios, chat) sigue en el store en
+  memoria de `lib/social/store.ts`, y sobre una identidad falsa: `currentUserId`
+  está fijo en una cuenta, así que el feed se ve igual inicie sesión quien
+  inicie. Todo lo demás depende de arreglar eso primero.
+- Avatares y carrete todavía viajan como data-URIs; los posts ya suben al bucket.
+- Mensajería de verdad: directas, grupos de varias personas y mensajes masivos
+  del club a los destinatarios que elija el panel. Con lecturas y tiempo real.
 - Push notifications: `web-push` y las claves VAPID están en el proyecto pero
   todavía no hay flujo de suscripción.
+
+Auth real y la persistencia del contenido del panel **ya están** — si este
+README dice lo contrario en algún lado, el que vale es `PLAN.md`.
