@@ -31,6 +31,22 @@ export const COL = {
   /** ajustes de una sola fila del panel (hoy: el día del cronograma). */
   config: `${PREFIX}-config`,
 
+  /* ── la historia del club (`lib/historia/`) ─────────────────────────────── */
+  /** identidad, palmarés y balance: una sola fila. Ver `HistoriaClubDoc`. */
+  historia: `${PREFIX}-historia`,
+  /** las etapas de la línea de tiempo. Ver `EraDoc`. */
+  era: `${PREFIX}-era`,
+  /** las temporadas; el id del documento **es** el año. Ver `TemporadaDoc`. */
+  temporada: `${PREFIX}-temporada`,
+  /** las fichas de trayectoria. Colección aparte de `-jugador`: ver `PlayerDoc`. */
+  historiaJugador: `${PREFIX}-historia-jugador`,
+  /** frases célebres. Ver `FraseDoc`. */
+  frase: `${PREFIX}-frase`,
+  /** el museo: fotos del archivo. Ver `FotoDoc`. */
+  foto: `${PREFIX}-foto`,
+  /** los videos del archivo. Ver `ClipDoc`. */
+  clip: `${PREFIX}-clip`,
+
   /** avisos de campanita: un documento por destinatario. Los escribe el
    *  servidor (`lib/social/notify.ts`) y los lee `social/queries.ts`. Ver
    *  `NotificacionDoc`. */
@@ -44,6 +60,15 @@ export const COL = {
  *  Ruta completa: `trapnexport-config/cronograma`. Ver `CronogramaConfigDoc`.
  */
 export const CONFIG_CRONOGRAMA = "cronograma";
+
+/** El único documento dentro de `trapnexport-historia`.
+ *
+ *  Identidad del club, palmarés y balance de finales son una sola fila que se
+ *  edita junta en la solapa "Club" del panel, así que van en un documento con
+ *  nombre fijo y no en una colección de uno. Ruta completa:
+ *  `trapnexport-historia/club`. Ver `HistoriaClubDoc`.
+ */
+export const HISTORIA_CLUB = "club";
 
 /** Subcolecciones de `trapnexport-user/{uid}`.
  *

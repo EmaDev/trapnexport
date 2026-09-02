@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { CLUB, getPlayer, getSeason, SEASON_SLUGS, type Player } from "@/lib/historia";
+import { getClub, getPlayer, getSeason, getSeasonSlugs } from "@/lib/historia/queries";
+import type { Player } from "@/lib/historia/types";
 import { absoluteUrl } from "@/lib/site";
 import { YearClient } from "./YearClient";
 
@@ -14,6 +15,7 @@ export async function generateMetadata({
   const season = await getSeason(year);
   if (!season) return { title: "Temporada no encontrada" };
 
+  const club = await getClub();
   const url = absoluteUrl(`/historia/${season.year}`);
   const title = `${season.year}: ${season.title}`;
 
@@ -25,7 +27,7 @@ export async function generateMetadata({
       type: "article",
       url,
       // Ver el comentario de `/historia`: el club y la app son el mismo nombre.
-      title: `${title} · ${CLUB.name}`,
+      title: `${title} · ${club.name}`,
       description: season.tagline,
     },
     twitter: { card: "summary" },
@@ -50,7 +52,7 @@ export default async function YearPage({ params }: { params: Promise<{ year: str
   ).filter((h): h is { player: Player; reason: string } => h !== null);
 
   // Las temporadas vecinas, para poder recorrer la historia sin volver atrás.
-  const numbers = SEASON_SLUGS.map(Number).sort((a, b) => a - b);
+  const numbers = (await getSeasonSlugs()).map(Number).sort((a, b) => a - b);
   const i = numbers.indexOf(season.year);
 
   return (

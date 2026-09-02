@@ -5,6 +5,7 @@ import {
   CalendarIcon,
   NewsIcon,
   PollIcon,
+  ShieldIcon,
   TicketIcon,
   UsersIcon,
 } from "@/components/atoms/icons";
@@ -12,15 +13,17 @@ import { requireAdmin } from "@/lib/admin/auth";
 import { getCuentasStats } from "@/lib/admin/cuentas";
 import { getContenidoStats, getProximosEventos } from "@/lib/contenido/queries";
 import { TIPO_EVENTO } from "@/lib/contenido/types";
+import { getHistoriaStats } from "@/lib/historia/queries";
 import { getAdminStats } from "@/lib/social/queries";
 import { PageHeading } from "./PageHeading";
 
 export const metadata = { title: "Panel" };
 
-/** Los cuatro accesos rápidos, que son las cuatro secciones de contenido.
+/** Los accesos rápidos, que son las secciones de contenido.
  *
  *  El orden no es alfabético: es el de uso. Noticias y encuestas se cargan
- *  todas las semanas; invitaciones y cronograma, por evento. */
+ *  todas las semanas; invitaciones y cronograma, por evento; la historia del
+ *  club, de vez en cuando y en tandas largas — por eso va última. */
 const ACCESOS = [
   {
     href: "/admin/noticias",
@@ -46,16 +49,23 @@ const ACCESOS = [
     icon: <CalendarIcon width={22} height={22} />,
     hint: "El programa del día del evento, hora por hora.",
   },
+  {
+    href: "/admin/historia",
+    label: "Historia",
+    icon: <ShieldIcon width={22} height={22} />,
+    hint: "Las siete secciones de /historia: club, etapas, temporadas, jugadores y archivo.",
+  },
 ] as const;
 
 export default async function AdminHomePage() {
   await requireAdmin();
 
-  const [stats, cuentas, contenido, proximos] = await Promise.all([
+  const [stats, cuentas, contenido, proximos, historia] = await Promise.all([
     getAdminStats(),
     getCuentasStats(),
     getContenidoStats(),
     getProximosEventos(4),
+    getHistoriaStats(),
   ]);
 
   /** El contador que va debajo del nombre de cada acceso rápido. Es lo que
@@ -66,6 +76,7 @@ export default async function AdminHomePage() {
     "/admin/encuestas": `${contenido.encuestasAbiertas} abiertas · ${contenido.votos} votos`,
     "/admin/invitaciones": `${contenido.invitacionesActivas} activas de ${contenido.invitaciones}`,
     "/admin/cronograma": `${contenido.diaEvento} · ${contenido.eventosProximos} de ${contenido.eventos} por venir`,
+    "/admin/historia": `${historia.etapas} etapas · ${historia.temporadas} temporadas · ${historia.jugadores} jugadores`,
   };
 
   return (

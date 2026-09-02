@@ -125,7 +125,8 @@ const SECTIONS: Chip[] = [
 ];
 
 export function HistoriaClient({ historia }: { historia: Historia }) {
-  const { club, trophies, eras, seasons, players, quotes, gallery, clips } = historia;
+  const { club, balance, trophies, eras, seasons, players, quotes, gallery, clips } =
+    historia;
   const router = useRouter();
   const reduced = usePrefersReducedMotion();
   const { unread, open, unreadChats } = useNotifications();
@@ -146,7 +147,10 @@ export function HistoriaClient({ historia }: { historia: Historia }) {
 
   // El guion es una función de las etapas, así que se recalcula sólo si cambian
   // — no en cada render de una pantalla que tiene siete secciones animadas.
-  const trayectoria = useMemo(() => armarTrayectoria(eras, club), [eras, club]);
+  const trayectoria = useMemo(
+    () => armarTrayectoria(eras, club, balance),
+    [eras, club, balance],
+  );
 
   const presentar = (orientacion: Orientacion) => {
     setElegirOrientacion(false);

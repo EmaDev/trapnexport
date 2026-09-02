@@ -23,5 +23,29 @@ service firebase.storage {
 
       allow delete: if true;
     }
+
+    // Imágenes de la historia del club, subidas desde `/admin/historia`
+    // (`lib/storage/historia-image.ts`): escudo, fotos de etapas, portadas de
+    // temporada, retratos, museo y pósters de clips.
+    //
+    // Son contenido público del club: cualquiera las lee, igual que las del
+    // feed. La escritura tampoco pide token, y el motivo es concreto: el panel
+    // se autentica con la cookie de sesión que verifica el servidor
+    // (`lib/admin/auth.ts`), no con Firebase Auth en el navegador, así que
+    // desde acá no hay `request.auth` que mirar. Lo que sí se acota es qué se
+    // puede depositar: imágenes de hasta 4 MB. El uploader ya sube WebP de
+    // 100–300 KB; el margen es para no rechazar un caso raro.
+    //
+    // El día que el panel inicie sesión con Firebase Auth en el cliente, esto
+    // pasa a `request.auth.token.admin == true`, que es el mismo claim que ya
+    // exige `requireAdmin()`.
+    match /trapnexport-historia/{fileName} {
+      allow read: if true;
+
+      allow create, update: if request.resource.size < 4 * 1024 * 1024
+                            && request.resource.contentType.matches('image/.*');
+
+      allow delete: if true;
+    }
   }
 }

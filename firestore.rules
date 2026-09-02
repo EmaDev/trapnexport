@@ -179,6 +179,30 @@ service cloud.firestore {
     match /trapnexport-evento/{id}     { allow read, write: if false; }
     match /trapnexport-config/{id}     { allow read, write: if false; }
 
+    /* ── la historia del club ────────────────────────────────────────────── */
+
+    /*  Identidad, etapas, temporadas, fichas de trayectoria, frases, museo y
+     *  video: todo lo que se ve en `/historia` y se edita en `/admin/historia`.
+     *
+     *  Mismo criterio que el bloque de arriba, con un matiz que conviene dejar
+     *  dicho porque es contraintuitivo: **esto es contenido público y aun así
+     *  la lectura está cerrada**. La pantalla pública es un Server Component y
+     *  lo lee con el Admin SDK (`lib/historia/queries.ts`), así que ningún
+     *  navegador pide estos documentos por su cuenta. Abrir la lectura no
+     *  habilitaría nada que hoy no se pueda ver, pero sí expondría una API de
+     *  consulta que nadie usa.
+     *
+     *  Las imágenes son la excepción y viven en otro lado: van a Firebase
+     *  Storage y sus reglas sí permiten lectura pública, porque las pide el
+     *  `<img>` del navegador. Ver `storage.rules`. */
+    match /trapnexport-historia/{id}         { allow read, write: if false; }
+    match /trapnexport-era/{id}              { allow read, write: if false; }
+    match /trapnexport-temporada/{id}        { allow read, write: if false; }
+    match /trapnexport-historia-jugador/{id} { allow read, write: if false; }
+    match /trapnexport-frase/{id}            { allow read, write: if false; }
+    match /trapnexport-foto/{id}             { allow read, write: if false; }
+    match /trapnexport-clip/{id}             { allow read, write: if false; }
+
     /* ── trapnexport-notification ────────────────────────────────────────── */
 
     /*  Avisos de campanita, un documento por destinatario. Los escribe el

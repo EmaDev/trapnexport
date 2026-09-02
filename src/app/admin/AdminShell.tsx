@@ -10,6 +10,7 @@ import {
   PollIcon,
   PostsIcon,
   PresentIcon,
+  ShieldIcon,
   TicketIcon,
   UsersIcon,
 } from "@/components/atoms/icons";
@@ -44,6 +45,10 @@ const SECTIONS: SidebarSection[] = [
       { label: "Encuestas", href: "/admin/encuestas", icon: <PollIcon /> },
       { label: "Invitaciones", href: "/admin/invitaciones", icon: <TicketIcon /> },
       { label: "Cronograma", href: "/admin/cronograma", icon: <CalendarIcon /> },
+      // Última del grupo y no primera: las cuatro de arriba son la carga del
+      // día a día; la historia del club se toca de vez en cuando y en tandas
+      // largas.
+      { label: "Historia", href: "/admin/historia", icon: <ShieldIcon /> },
     ],
   },
   // Grupo propio y no un ítem más de "Contenido": esto no carga nada. Es la

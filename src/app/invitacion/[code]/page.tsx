@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { InvitationStage } from "@/components/organisms/InvitationStage";
 import { getInvitacionByCode } from "@/lib/contenido/queries";
-import { CLUB } from "@/lib/historia";
+import { getClub } from "@/lib/historia/queries";
 import { FONDO_INVITACION } from "@/lib/invitacion/fondo";
 import { absoluteUrl } from "@/lib/site";
 import { longDate } from "@/lib/time";
@@ -30,9 +30,11 @@ export async function generateMetadata({
   const inv = await getInvitacionByCode(code);
   if (!inv) return { title: "Invitación no disponible", robots: { index: false } };
 
+  const club = await getClub();
+
   return {
     title: `${inv.titulo} · Invitación para ${inv.invitado}`,
-    description: `${CLUB.name} invita a ${inv.invitado} · ${longDate(inv.fecha)} · ${inv.hora} h`,
+    description: `${club.name} invita a ${inv.invitado} · ${longDate(inv.fecha)} · ${inv.hora} h`,
     robots: { index: false, follow: false },
     alternates: { canonical: absoluteUrl(`/invitacion/${inv.code}`) },
     openGraph: {
@@ -56,6 +58,11 @@ export default async function InvitacionPage({
   // dado de baja tiene que dar 404, no mostrar la tarjeta con un cartel encima.
   if (!inv) notFound();
 
+  // El nombre y el escudo salen de la historia del club, que se edita en
+  // /admin/historia: renombrar el club cambia también las invitaciones ya
+  // emitidas, que es lo que se espera de una tarjeta a su nombre.
+  const club = await getClub();
+
   return (
     <main
       className={`flex min-h-screen items-center justify-center px-4 py-10 ${FONDO_INVITACION}`}
@@ -71,7 +78,7 @@ export default async function InvitacionPage({
           plantilla={inv.plantilla}
           efecto={inv.efecto}
           revelacion={inv.revelacion}
-          club={{ name: CLUB.name, crest: CLUB.crest }}
+          club={{ name: club.name, crest: club.crest }}
           url={absoluteUrl(`/invitacion/${inv.code}`)}
           seed={inv.code}
           // Por prop y no acá abajo: la nota se destapa junto con los botones,
@@ -80,7 +87,7 @@ export default async function InvitacionPage({
           // servidor.
           pie={
             <p className="text-center text-xs leading-relaxed text-white/45">
-              Invitación personal de {CLUB.name}. Si tenés dudas, respondé el
+              Invitación personal de {club.name}. Si tenés dudas, respondé el
               mensaje por donde te llegó.
             </p>
           }

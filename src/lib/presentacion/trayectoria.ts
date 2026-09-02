@@ -1,4 +1,4 @@
-import { BALANCE, type ClubIdentity, type Era, type MilestoneKind } from "@/lib/historia";
+import type { Balance, ClubIdentity, Era, MilestoneKind } from "@/lib/historia";
 
 /** El guion de la trayectoria: de las etapas de `/historia` a la lista de
  *  viñetas que se proyecta en el modo presentación.
@@ -7,6 +7,11 @@ import { BALANCE, type ClubIdentity, type Era, type MilestoneKind } from "@/lib/
  *  `next/*` ni lecturas de base, porque lo ejecuta un componente cliente. Y es
  *  **derivado, no guardado**: la presentación es una función de `ERAS`, así que
  *  agregar un hito a la historia lo mete en la proyección sin tocar nada acá.
+ *
+ *  `balance` entra por parámetro y no se importa como constante, al revés de
+ *  como estaba antes: los cuatro números del cierre se editan en
+ *  `/admin/historia` igual que todo lo demás, y una constante importada los
+ *  dejaría congelados en lo que decían el día del build.
  *
  *  La diferencia con la gala es qué se aplana. Allá cada categoría abre en
  *  varias placas (nominados, suspenso, ganador, resultados). Acá el desglose es
@@ -86,7 +91,11 @@ export type Vineta = VinetaPortada | VinetaEtapa | VinetaHito | VinetaCierre;
  *  para que el riel les dé un color coherente y no una marca huérfana al
  *  principio y al final.
  */
-export function armarTrayectoria(eras: Era[], club: ClubIdentity): Vineta[] {
+export function armarTrayectoria(
+  eras: Era[],
+  club: ClubIdentity,
+  balance: Balance,
+): Vineta[] {
   if (eras.length === 0) return [];
 
   const primera = eras[0];
@@ -103,7 +112,7 @@ export function armarTrayectoria(eras: Era[], club: ClubIdentity): Vineta[] {
     abreEtapa: false,
     titulo: club.name,
     bajada: `${eras.length} capítulos, de ${club.founded} a hoy`,
-    estrellas: BALANCE.estrellas,
+    estrellas: balance.estrellas,
   });
 
   eras.forEach((era, i) => {
@@ -151,10 +160,10 @@ export function armarTrayectoria(eras: Era[], club: ClubIdentity): Vineta[] {
     titulo: "La historia recién empieza",
     bajada: club.motto,
     stats: [
-      { label: "Finales", value: String(BALANCE.finales) },
-      { label: "Ganadas", value: String(BALANCE.ganadas) },
-      { label: "Perdidas", value: String(BALANCE.perdidas) },
-      { label: "Estrellas", value: String(BALANCE.estrellas) },
+      { label: "Finales", value: String(balance.finales) },
+      { label: "Ganadas", value: String(balance.ganadas) },
+      { label: "Perdidas", value: String(balance.perdidas) },
+      { label: "Estrellas", value: String(balance.estrellas) },
     ],
   });
 

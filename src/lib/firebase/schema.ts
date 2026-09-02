@@ -377,3 +377,190 @@ export interface JugadorDoc {
    *  primer lugar a la misma persona en las catorce votaciones. */
   orden: number;
 }
+
+/* ── la historia del club ────────────────────────────────────────────────── */
+
+/** Los documentos de `lib/historia/`, uno por sección de `/historia`.
+ *
+ *  Todos se editan desde `/admin/historia` y los lee `historia/queries.ts` con
+ *  el Admin SDK. Dos decisiones que se repiten en los siete:
+ *
+ *  1. **Los campos van en inglés**, al revés que el resto del panel. No es
+ *     inconsistencia por descuido: replican uno a uno las entidades de
+ *     `lib/historia/types.ts` (`Era`, `Season`, `Player`…), que son las que
+ *     consumen las pantallas públicas y los componentes de la librería. Un
+ *     mapper que tradujera `title` ↔ `titulo` en catorce campos sería una
+ *     tabla de equivalencias que hay que mantener a mano para no ganar nada.
+ *
+ *  2. **Las listas van embebidas**, no en subcolecciones: los hitos de una
+ *     etapa, las skills de un jugador o las fotos de una temporada se leen y
+ *     se reescriben siempre con su padre, son pocas, y el tope de 1 MB por
+ *     documento sobra. Una subcolección obligaría a un `get` extra por fila
+ *     para dibujar una pantalla que ya se pide entera.
+ */
+
+/** `trapnexport-historia/club`. Identidad, palmarés y balance en una fila.
+ *  Refleja `ClubIdentity` + `Trophy[]` + `Balance`. */
+export interface HistoriaClubDoc {
+  name: string;
+  nickname: string;
+  founded: number;
+  stadium: string;
+  colors: string;
+  motto: string;
+  /** cuántos pasaron por el plantel; el hero lo cuenta con `CountUp` */
+  members: number;
+  /** ruta o URL del escudo */
+  crest: string;
+  intro: string;
+  trophies: { id: string; name: string; times: number; years: string }[];
+  balance: { finales: number; ganadas: number; perdidas: number; estrellas: number };
+  updatedAt: FsTimestamp;
+}
+
+/** `trapnexport-era/{id}`. Refleja `Era`.
+ *
+ *  `orden` existe porque la línea de tiempo se lee **hacia adelante** y
+ *  `period` es texto libre ("2023", "2020 — 2022"): ordenar por ese string
+ *  pondría "2020 — 2022" después de "2023". El panel lo asigna al crear y lo
+ *  cambia al subir/bajar una etapa. */
+export interface EraDoc {
+  period: string;
+  title: string;
+  tagline: string;
+  description: string;
+  photo: string;
+  /** la etapa que todavía se está jugando marca el timeline como "en curso" */
+  current?: boolean;
+  stats: { label: string; value: string }[];
+  milestones: {
+    id: string;
+    date: string;
+    title: string;
+    description: string;
+    kind: string;
+  }[];
+  orden: number;
+}
+
+/** Una foto embebida en una temporada o en una ficha de jugador. Igual a
+ *  `Photo` salvo que acá `src` es siempre un valor guardado: o la URL de
+ *  Storage que subió el panel, o el data-URI generado de `lib/media.ts`. */
+export interface FotoEmbebidaDoc {
+  id: string;
+  src: string;
+  alt: string;
+  caption: string;
+  year: number;
+}
+
+/** Un clip embebido. Igual a `Clip`. */
+export interface ClipEmbebidoDoc {
+  id: string;
+  title: string;
+  description: string;
+  year: number;
+  duration: string;
+  poster: string;
+  motion: string;
+  src?: string;
+}
+
+/** Una frase embebida (el cierre de una temporada o de una ficha). Igual a
+ *  `Quote`. */
+export interface FraseEmbebidaDoc {
+  id: string;
+  text: string;
+  author: string;
+  role: string;
+  year: number;
+  avatar: string;
+}
+
+/** `trapnexport-temporada/{año}`. Refleja `Season`.
+ *
+ *  El id del documento **es** el año (`"2025"`), no un id al azar: es lo que
+ *  va en la URL pública `/historia/:año`, y con un id autogenerado esa ruta
+ *  necesitaría un `where("year", "==", …)` para resolver cada visita. */
+export interface TemporadaDoc {
+  year: number;
+  title: string;
+  tagline: string;
+  cover: string;
+  competition: string;
+  position: string;
+  captain: string;
+  topScorer: string;
+  stats: { label: string; value: string }[];
+  highlights: {
+    id: string;
+    month: string;
+    title: string;
+    description: string;
+    kind: string;
+  }[];
+  /** ids de `trapnexport-historia-jugador`, con el motivo */
+  hallOfFame: { playerId: string; reason: string }[];
+  gallery: FotoEmbebidaDoc[];
+  clips: ClipEmbebidoDoc[];
+  quote?: FraseEmbebidaDoc;
+}
+
+/** `trapnexport-historia-jugador/{slug}`. Refleja `Player`.
+ *
+ *  Colección aparte de `trapnexport-jugador` porque son dos cosas distintas:
+ *  aquélla es el plantel de la edición en curso —nombre, apodo, orden en las
+ *  votaciones— y ésta es la ficha de trayectoria que se muestra en
+ *  `/historia`, con carrera, fotos y clips. Comparten el slug a propósito, así
+ *  que un jugador está en las dos con el mismo id y no hace falta traducir. */
+export interface PlayerDoc {
+  name: string;
+  nickname: string;
+  number: number;
+  position: string;
+  /** "2020 — 2023" o "2019 — hoy" */
+  years: string;
+  status: string;
+  foot: string;
+  height: string;
+  birthplace: string;
+  photo: string;
+  avatar: string;
+  bio: string;
+  stats: { label: string; value: string }[];
+  /** 0 a 100 — es la escala de `ProgressBar`, no una nota sobre 10 */
+  skills: { label: string; value: number }[];
+  career: {
+    id: string;
+    season: string;
+    title: string;
+    description: string;
+    status: string;
+  }[];
+  gallery: FotoEmbebidaDoc[];
+  clips: ClipEmbebidoDoc[];
+  quote?: FraseEmbebidaDoc;
+  /** posición en la grilla de jugadores; mismo motivo que `EraDoc.orden` */
+  orden: number;
+}
+
+/** Las tres colecciones sueltas del archivo: frases, fotos del museo y clips.
+ *
+ *  Son la misma forma que sus versiones embebidas menos el `id` —el id del
+ *  documento ya **es** el id, y guardarlo dos veces es un campo que se puede
+ *  desincronizar— más el `orden` con el que se muestran. */
+
+/** `trapnexport-frase/{id}`. Refleja `Quote`. */
+export interface FraseDoc extends Omit<FraseEmbebidaDoc, "id"> {
+  orden: number;
+}
+
+/** `trapnexport-foto/{id}`. Refleja `Photo` — el museo de `/historia`. */
+export interface FotoDoc extends Omit<FotoEmbebidaDoc, "id"> {
+  orden: number;
+}
+
+/** `trapnexport-clip/{id}`. Refleja `Clip` — la sección de video. */
+export interface ClipDoc extends Omit<ClipEmbebidoDoc, "id"> {
+  orden: number;
+}

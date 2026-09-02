@@ -1,31 +1,43 @@
+import {
+  type Balance,
+  type Clip,
+  type ClubIdentity,
+  type Era,
+  type Photo,
+  type Player,
+  type Quote,
+  type Season,
+  type Trophy,
+} from "@/lib/historia/types";
 import { avatarUrl, clipUrl, photoUrl, playerPhotoUrl } from "@/lib/media";
 
-/** La historia del club: 2020 → hoy.
+/** La historia del club, tal como se cargó de arranque: 2020 → hoy.
  *
- *  Es contenido editorial, no dominio social, así que vive acá y no en
- *  `social/queries.ts` — el panel de moderación no tiene nada que hacer con
- *  esto. Las funciones son `async` a propósito: hoy leen los arrays de abajo,
- *  mañana leen un CMS o Firestore y las pantallas no cambian.
+ *  Esto es la **semilla**, no la fuente de verdad. La fuente de verdad es
+ *  Firestore, y se edita entera desde `/admin/historia`: identidad, palmarés,
+ *  balance, etapas, temporadas, jugadores, frases, fotos y clips. Lo de acá es
+ *  lo que `queries.ts` devuelve mientras una colección todavía esté vacía y lo
+ *  que el botón "Importar contenido actual" del panel copia a la base la
+ *  primera vez.
  *
- *  Cinco colecciones, cada una con su pantalla:
+ *  Sigue existiendo por dos motivos que no son nostalgia:
  *
- *    CLUB      identidad — escudo, fundación, colores, palmarés
- *    ERAS      la línea de tiempo grande: 2020 → hoy, por etapa
- *    SEASONS   una temporada en detalle → `/historia/:año`
- *    PLAYERS   trayectoria individual: skills, fotos, clips, frase
- *    QUOTES    frases célebres, sueltas de cualquier año
+ *  1. La app arranca mostrando la historia completa en un proyecto de Firebase
+ *     recién creado, sin un paso de seed obligatorio entre `npm run dev` y la
+ *     primera pantalla.
+ *  2. Es el texto original contra el que comparar si alguien borra algo del
+ *     panel por error.
  *
- *  ⚠️ A diferencia de la versión anterior de este archivo, TODO lo de acá sale
- *  de `data.txt`, la historia real de Trap N Export: nace en 2020, en plena
- *  pandemia, jugando FIFA 20; salta al fútbol 8 en 2022; atraviesa en 2023 el
- *  golpe más duro de su historia y se reforma en fútbol 11; pierde su primera
- *  final en 2024; gana las dos primeras estrellas en 2025 (Mega Fútbol y Liga
- *  Oeste); y cierra la tercera en la Copa Oro de 2026. Los nombres, fechas,
- *  resultados y goleadores son los reales. Lo que `data.txt` no dice —números
- *  de camiseta, posiciones, "skills" en escala de 0 a 100, alguna frase de
- *  color— es relleno liviano en el mismo tono que ya tenía `trap-awards.ts`
- *  para este mismo plantel (los "premios" tipo Fachero, Pollera, Aura): una
- *  app privada para el grupo, no una biografía pública.
+ *  ⚠️ TODO lo de acá sale de `data.txt`, la historia real de Trap N Export:
+ *  nace en 2020, en plena pandemia, jugando FIFA 20; salta al fútbol 8 en
+ *  2022; atraviesa en 2023 el golpe más duro de su historia y se reforma en
+ *  fútbol 11; pierde su primera final en 2024; gana las dos primeras estrellas
+ *  en 2025 (Mega Fútbol y Liga Oeste); y cierra la tercera en la Copa Oro de
+ *  2026. Los nombres, fechas, resultados y goleadores son los reales. Lo que
+ *  `data.txt` no dice —números de camiseta, posiciones, "skills" en escala de
+ *  0 a 100, alguna frase de color— es relleno liviano en el mismo tono que ya
+ *  tenía `trap-awards.ts` para este mismo plantel: una app privada para el
+ *  grupo, no una biografía pública.
  *
  *  Yannick Castelo es la única excepción a ese relleno: `data.txt` cuenta que
  *  su pérdida en 2023 disolvió al equipo casi cuatro meses, y esa ficha va sin
@@ -35,30 +47,7 @@ import { avatarUrl, clipUrl, photoUrl, playerPhotoUrl } from "@/lib/media";
  *  El `id` de cada jugador real es el mismo que el de `JUGADORES` en
  *  `lib/trap-awards.ts`, así que el día que eso salga de la base, los
  *  perfiles se emparejan sin traducción de por medio.
- *
- *  Para renombrar el club alcanza con tocar `CLUB`, acá abajo — el escudo se
- *  regenera de su `name` y su `founded`, y ninguna pantalla lo hardcodea.
  */
-
-/* ── identidad ───────────────────────────────────────────────────────────── */
-
-export interface ClubIdentity {
-  name: string;
-  /** cómo le dice la gente; sale en el hero y en los subtítulos */
-  nickname: string;
-  founded: number;
-  /** dónde juega hoy; sale junto al apodo en el hero */
-  stadium: string;
-  colors: string;
-  motto: string;
-  /** jugadores que pasaron por el plantel a lo largo de la historia — el hero
-   *  lo cuenta con `CountUp` */
-  members: number;
-  /** ruta del escudo en `public/` */
-  crest: string;
-  /** el párrafo de apertura de la pantalla */
-  intro: string;
-}
 
 export const CLUB: ClubIdentity = {
   name: "Trap N Export",
@@ -76,15 +65,7 @@ export const CLUB: ClubIdentity = {
     "Abajo está entera, capítulo por capítulo, con los que la jugaron.",
 };
 
-export interface Trophy {
-  id: string;
-  name: string;
-  /** cuántas veces, ya formateado ("×3") o vacío si es una sola */
-  times: number;
-  years: string;
-}
-
-const TROPHIES: Trophy[] = [
+export const TROPHIES: Trophy[] = [
   { id: "t1", name: "Mega Fútbol · 90 Minutos", times: 1, years: "2025" },
   { id: "t2", name: "Liga Oeste", times: 1, years: "2025" },
   { id: "t3", name: "Copa Oro · La Caprichosa", times: 1, years: "2026" },
@@ -96,56 +77,14 @@ const TROPHIES: Trophy[] = [
  *  Liga Núñez en diciembre de 2024 y la otra— no dejan trofeo, así que
  *  contarlas desde el palmarés daría 3 de 3 y borraría justo la mitad de la
  *  historia que explica por qué la tercera importa. */
-export const BALANCE = {
+export const BALANCE: Balance = {
   finales: 5,
   ganadas: 3,
   perdidas: 2,
   estrellas: 3,
-} as const;
+};
 
-/* ── la línea de tiempo grande ───────────────────────────────────────────── */
-
-/** El tipo de hito define su color y su ícono en el timeline.
- *
- *  `derrota` y `homenaje` son los dos en tono serio: una historia de club sin
- *  la parte difícil no es una historia, y no todo lo difícil es una derrota
- *  deportiva — `homenaje` existe puntualmente para la pérdida de Yannick
- *  Castelo en 2023, sin la connotación de "resultado adverso" que tendría
- *  reusar `derrota` para eso. */
-export type MilestoneKind =
-  | "titulo"
-  | "ascenso"
-  | "derrota"
-  | "debut"
-  | "obra"
-  | "partido"
-  | "homenaje"
-  | "evento";
-
-export interface Milestone {
-  id: string;
-  /** cuándo, tal como se muestra: "Mayo 2016", "12/11/2011" */
-  date: string;
-  title: string;
-  description: string;
-  kind: MilestoneKind;
-}
-
-export interface Era {
-  id: string;
-  /** el rango de años, que hace de "número" del capítulo */
-  period: string;
-  title: string;
-  tagline: string;
-  description: string;
-  photo: string;
-  /** la etapa que todavía se está jugando marca el timeline como "en curso" */
-  current?: boolean;
-  stats: { label: string; value: string }[];
-  milestones: Milestone[];
-}
-
-const ERAS: Era[] = [
+export const ERAS: Era[] = [
   {
     id: "era-2020",
     period: "2020",
@@ -440,18 +379,6 @@ const ERAS: Era[] = [
   },
 ];
 
-/* ── frases célebres ─────────────────────────────────────────────────────── */
-
-export interface Quote {
-  id: string;
-  text: string;
-  author: string;
-  /** quién era esa persona cuando lo dijo */
-  role: string;
-  year: number;
-  avatar: string;
-}
-
 const quote = (
   id: string,
   text: string,
@@ -466,7 +393,7 @@ const quote = (
  *  momento, así que atribuírselas a un jugador puntual sería inventar una
  *  cita en boca de una persona real — esto no. Por eso el avatar es el
  *  escudo, no un retrato generado. */
-const QUOTES: Quote[] = [
+export const QUOTES: Quote[] = [
   {
     id: "q1",
     text: "Cuando está contra las cuerdas, pone el pecho.",
@@ -501,16 +428,6 @@ const QUOTES: Quote[] = [
   },
 ];
 
-/* ── fotos y clips ───────────────────────────────────────────────────────── */
-
-export interface Photo {
-  id: string;
-  src: string;
-  alt: string;
-  caption: string;
-  year: number;
-}
-
 const photo = (id: string, caption: string, year: number, alt = caption): Photo => ({
   id,
   src: photoUrl(id),
@@ -518,25 +435,6 @@ const photo = (id: string, caption: string, year: number, alt = caption): Photo 
   caption,
   year,
 });
-
-/** Un clip del archivo.
- *
- *  `poster` y `motion` son el mismo SVG generado con y sin animación: la card
- *  muestra el primero y pasa al segundo mientras "reproduce". `src` es el
- *  hueco del `.mp4` real — cuando exista, `ClipCard` monta el `VideoPlayer` de
- *  la librería y los dos SVG quedan sólo como póster.
- */
-export interface Clip {
-  id: string;
-  title: string;
-  description: string;
-  year: number;
-  /** duración ya formateada, tal como se muestra en el badge */
-  duration: string;
-  poster: string;
-  motion: string;
-  src?: string;
-}
 
 const clip = (
   id: string,
@@ -554,7 +452,7 @@ const clip = (
   motion: clipUrl(id, true),
 });
 
-const GALLERY: Photo[] = [
+export const GALLERY: Photo[] = [
   photo("g1", "Los primeros picados por FIFA 20, en plena pandemia", 2020),
   photo("g2", "El debut en Pura Gambeta, Club Galopo", 2022),
   photo("g3", "Los Trap Awards, la ceremonia", 2023),
@@ -566,7 +464,7 @@ const GALLERY: Photo[] = [
   photo("g9", "Campeones de la Copa Oro: la tercera estrella", 2026),
 ];
 
-const CLIPS: Clip[] = [
+export const CLIPS: Clip[] = [
   clip("c1", "El regreso al fútbol 11", "Noviembre de 2023: Trap se junta otra vez.", 2023, "1:20"),
   clip("c2", "Los cinco goles del 22 de diciembre", "La goleada 5-0 que cerró el 2025.", 2025, "2:30"),
   clip("c3", "El doblete de Martín Motta", "Los dos goles de la final del 22 de diciembre.", 2025, "0:50"),
@@ -575,53 +473,7 @@ const CLIPS: Clip[] = [
   clip("c6", "Campeones de la Copa Oro", "El resumen completo de la final.", 2026, "3:00"),
 ];
 
-/* ── jugadores ───────────────────────────────────────────────────────────── */
-
-export type PlayerStatus = "plantel" | "leyenda";
-
-export interface PlayerSkill {
-  label: string;
-  /** 0 a 100 — es la escala de `ProgressBar`, no una nota sobre 10 */
-  value: number;
-}
-
-export interface CareerStep {
-  id: string;
-  season: string;
-  title: string;
-  description: string;
-  status: "done" | "current";
-}
-
-export interface Player {
-  id: string;
-  name: string;
-  nickname: string;
-  number: number;
-  position: string;
-  /** "2022 — 2021" o "2019 — hoy" */
-  years: string;
-  status: PlayerStatus;
-  foot: string;
-  height: string;
-  birthplace: string;
-  photo: string;
-  avatar: string;
-  bio: string;
-  stats: { label: string; value: string }[];
-  /** vacío en las fichas en memoria: ver el comentario de Yannick Castelo,
-   *  más abajo, y el guard en `PlayerSpotlight`. */
-  skills: PlayerSkill[];
-  career: CareerStep[];
-  gallery: Photo[];
-  clips: Clip[];
-  /** ausente en las fichas en memoria: no hay transcripción real de lo que
-   *  dijo, e inventar una cita a nombre de una persona real que ya no está
-   *  no es el tipo de "relleno" que corresponde acá. */
-  quote?: Quote;
-}
-
-const PLAYERS: Player[] = [
+export const PLAYERS: Player[] = [
   {
     id: "yannick-castelo",
     name: "Yannick Castelo",
@@ -1250,39 +1102,7 @@ const PLAYERS: Player[] = [
   },
 ];
 
-/* ── temporadas ──────────────────────────────────────────────────────────── */
-
-export interface SeasonHighlight {
-  id: string;
-  month: string;
-  title: string;
-  description: string;
-  kind: MilestoneKind;
-}
-
-export interface Season {
-  year: number;
-  /** cómo se recuerda esa temporada, en pocas palabras */
-  title: string;
-  tagline: string;
-  cover: string;
-  competition: string;
-  /** dónde terminó — cuando no hay una posición numérica real, una frase que
-   *  resume el resultado ("Finalista", "Sin registro") */
-  position: string;
-  /** "Sin registro" cuando `data.txt` no dice quién era */
-  captain: string;
-  topScorer: string;
-  stats: { label: string; value: string }[];
-  highlights: SeasonHighlight[];
-  /** ids de `PLAYERS` que marcaron la temporada, con el motivo */
-  hallOfFame: { playerId: string; reason: string }[];
-  gallery: Photo[];
-  clips: Clip[];
-  quote?: Quote;
-}
-
-const SEASONS: Season[] = [
+export const SEASONS: Season[] = [
   {
     year: 2022,
     title: "El primer desafío",
@@ -1590,74 +1410,21 @@ const SEASONS: Season[] = [
   },
 ];
 
-/* ── lecturas ────────────────────────────────────────────────────────────── */
 
-export async function getClub(): Promise<ClubIdentity> {
-  return CLUB;
-}
+/* ── el paquete completo ─────────────────────────────────────────────────── */
 
-export async function getTrophies(): Promise<Trophy[]> {
-  return TROPHIES;
-}
-
-/** Las etapas, de la más vieja a la más nueva: la línea de tiempo se lee
- *  hacia adelante. Es lo contrario de las temporadas, que se leen desde hoy. */
-export async function getEras(): Promise<Era[]> {
-  return ERAS;
-}
-
-export async function getQuotes(): Promise<Quote[]> {
-  return QUOTES;
-}
-
-export async function getGallery(): Promise<Photo[]> {
-  return GALLERY;
-}
-
-export async function getClips(): Promise<Clip[]> {
-  return CLIPS;
-}
-
-export async function getPlayers(): Promise<Player[]> {
-  return PLAYERS;
-}
-
-export async function getPlayer(id: string): Promise<Player | null> {
-  return PLAYERS.find((p) => p.id === id) ?? null;
-}
-
-/** Las temporadas, de la más reciente a la más vieja. */
-export async function getSeasons(): Promise<Season[]> {
-  return [...SEASONS].sort((a, b) => b.year - a.year);
-}
-
-export async function getSeason(year: string | number): Promise<Season | null> {
-  const n = Number(year);
-  return SEASONS.find((s) => s.year === n) ?? null;
-}
-
-/** Todo lo que necesita `/historia`, en un solo `await`.
+/** Todo junto, en la forma que espera `/historia`.
  *
- *  La pantalla es una sola y consume las cinco colecciones: pedirlas de a una
- *  desde el Server Component serían seis `await` en fila que mañana, contra un
- *  CMS, son seis viajes de red. */
-export async function getHistoria() {
-  const [club, trophies, eras, seasons, players, quotes, gallery, clips] =
-    await Promise.all([
-      getClub(),
-      getTrophies(),
-      getEras(),
-      getSeasons(),
-      getPlayers(),
-      getQuotes(),
-      getGallery(),
-      getClips(),
-    ]);
-
-  return { club, trophies, eras, seasons, players, quotes, gallery, clips };
-}
-
-export type Historia = Awaited<ReturnType<typeof getHistoria>>;
-
-/** Para `generateStaticParams`: qué temporadas tienen página propia. */
-export const SEASON_SLUGS = SEASONS.map((s) => String(s.year));
+ *  Lo usan `queries.ts` (como fallback colección por colección) y la acción
+ *  `importarSemilla` del panel, que lo copia entero a Firestore. */
+export const SEED = {
+  club: CLUB,
+  balance: BALANCE,
+  trophies: TROPHIES,
+  eras: ERAS,
+  seasons: SEASONS,
+  players: PLAYERS,
+  quotes: QUOTES,
+  gallery: GALLERY,
+  clips: CLIPS,
+};
