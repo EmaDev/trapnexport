@@ -44,6 +44,12 @@ export interface Trophy {
   /** cuántas veces, ya formateado ("×3") o vacío si es una sola */
   times: number;
   years: string;
+  /** la foto de la copa, recortada con fondo transparente.
+   *
+   *  Opcional: los documentos que ya estaban en Firestore antes del carrusel
+   *  no la tienen, y una copa sin foto no es una fila rota — `PalmaresRail`
+   *  cae en el trofeo generado por `trophyUrl` y se ve igual de armada. */
+  photo?: string;
 }
 
 /** El balance de finales, tal como lo cierra `data.txt`.

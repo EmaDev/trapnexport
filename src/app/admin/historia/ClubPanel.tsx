@@ -111,7 +111,10 @@ export function ClubPanel({ inicial }: { inicial: ClubInput }) {
         />
       </Bloque>
 
-      <Bloque title="Palmarés" hint="La lista de trofeos, debajo del hero.">
+      <Bloque
+        title="Palmarés"
+        hint="El carrusel de copas, debajo del hero. Cada una se muestra con su foto."
+      >
         <ListaEditor
           label="Títulos"
           items={form.trophies}
@@ -119,30 +122,40 @@ export function ClubPanel({ inicial }: { inicial: ClubInput }) {
           max={40}
           agregar="Agregar título"
           vacio="Sin títulos cargados."
-          nuevo={() => ({ id: idLocal("t"), name: "", times: 1, years: "" })}
+          nuevo={() => ({ id: idLocal("t"), name: "", times: 1, years: "", photo: "" })}
         >
           {(t, i, setT) => (
-            <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr]">
-              <Input
-                label="Torneo"
-                value={t.name}
-                maxLength={120}
-                placeholder="Copa Oro · La Caprichosa"
-                onChange={(e) => setT({ ...t, name: e.target.value })}
-              />
-              <Input
-                label="Años"
-                value={t.years}
-                maxLength={80}
-                placeholder="2026"
-                onChange={(e) => setT({ ...t, years: e.target.value })}
-              />
-              <Input
-                label="Veces"
-                type="number"
-                min={1}
-                value={t.times}
-                onChange={(e) => setT({ ...t, times: Number(e.target.value) })}
+            <div className="flex flex-col gap-3">
+              <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr]">
+                <Input
+                  label="Torneo"
+                  value={t.name}
+                  maxLength={120}
+                  placeholder="Copa Oro · La Caprichosa"
+                  onChange={(e) => setT({ ...t, name: e.target.value })}
+                />
+                <Input
+                  label="Años"
+                  value={t.years}
+                  maxLength={80}
+                  placeholder="2026"
+                  onChange={(e) => setT({ ...t, years: e.target.value })}
+                />
+                <Input
+                  label="Veces"
+                  type="number"
+                  min={1}
+                  value={t.times}
+                  onChange={(e) => setT({ ...t, times: Number(e.target.value) })}
+                />
+              </div>
+
+              <ImageField
+                label="Foto de la copa"
+                aspect="5 / 8"
+                hint="La copa recortada, en PNG con fondo transparente: la card le pone el degradé atrás. Sin foto se dibuja una copa genérica."
+                value={t.photo ?? ""}
+                onChange={(v) => setT({ ...t, photo: v })}
               />
             </div>
           )}

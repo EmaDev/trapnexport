@@ -65,10 +65,39 @@ export const CLUB: ClubIdentity = {
     "Abajo está entera, capítulo por capítulo, con los que la jugaron.",
 };
 
+/** Las tres copas del club.
+ *
+ *  `photo` apunta a `public/trofeos/`: son las fotos reales de los trofeos,
+ *  PNG recortados con fondo transparente, y son assets de marca como el
+ *  escudo — no placeholders. Por eso van al repo y no a Storage: se ven
+ *  igual en un proyecto de Firebase recién creado, que es la razón de ser de
+ *  esta semilla.
+ *
+ *  Si un archivo todavía no está, `PalmaresRail` cae en la copa generada por
+ *  `trophyUrl` y la card se ve armada igual — de ahí que el import siga acá.
+ */
 export const TROPHIES: Trophy[] = [
-  { id: "t1", name: "Mega Fútbol · 90 Minutos", times: 1, years: "2025" },
-  { id: "t2", name: "Liga Oeste", times: 1, years: "2025" },
-  { id: "t3", name: "Copa Oro · La Caprichosa", times: 1, years: "2026" },
+  {
+    id: "t1",
+    name: "Mega Fútbol · 90 Minutos",
+    times: 1,
+    years: "2025",
+    photo: "/trofeos/90-minutos.png",
+  },
+  {
+    id: "t2",
+    name: "Liga Oeste",
+    times: 1,
+    years: "2025",
+    photo: "/trofeos/liga-oeste.png",
+  },
+  {
+    id: "t3",
+    name: "Copa Oro · La Caprichosa",
+    times: 1,
+    years: "2026",
+    photo: "/trofeos/caprichosa.png",
+  },
 ];
 
 /** El balance de finales, tal como lo cierra `data.txt`.

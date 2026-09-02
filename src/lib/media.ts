@@ -254,3 +254,60 @@ export function clipUrl(seed: string, playing = false): string {
     </svg>
   `);
 }
+
+/** La copa del palmarés, en 5:8 y con fondo transparente.
+ *
+ *  Es el único placeholder del módulo que **no** es violeta: una copa violeta
+ *  no se lee como una copa, y las tres del club son fotos reales de trofeos
+ *  dorados recortados. El fondo transparente es parte del contrato: las cards
+ *  de `PalmaresRail` ponen su propio degradé detrás, igual que hacen con los
+ *  PNG reales, así que un fondo acá saldría como un rectángulo pegado encima.
+ *
+ *  La variación por semilla es de material —dorada, plateada con detalles
+ *  dorados— y de si tiene asas: tres copas idénticas en fila leerían como un
+ *  error de carga, no como tres torneos distintos.
+ */
+export function trophyUrl(seed: string): string {
+  const plata = hash(`${seed}m`) % 3 === 0;
+  const asas = hash(`${seed}h`) % 2 === 0;
+
+  const copa = plata ? ["#f2f4f7", "#b9c0cb"] : ["#f7d774", "#c9962a"];
+  const oro = ["#f7d774", "#c9962a"];
+
+  const asa = (dir: 1 | -1) =>
+    `<path d="M${300 + dir * 96} 300c${dir * 92} -10 ${dir * 128} 60 ${
+      dir * 96
+    } 150" fill="none" stroke="url(#oro)" stroke-width="26" stroke-linecap="round"/>`;
+
+  return dataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 960">
+      <defs>
+        <linearGradient id="copa" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="${copa[1]}"/>
+          <stop offset="0.35" stop-color="${copa[0]}"/>
+          <stop offset="1" stop-color="${copa[1]}"/>
+        </linearGradient>
+        <linearGradient id="oro" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="${oro[1]}"/>
+          <stop offset="0.35" stop-color="${oro[0]}"/>
+          <stop offset="1" stop-color="${oro[1]}"/>
+        </linearGradient>
+      </defs>
+
+      ${asas ? asa(1) + asa(-1) : ""}
+
+      <path d="M204 250h192v96c0 82-43 132-96 132s-96-50-96-132v-96Z" fill="url(#copa)"/>
+      <path d="M188 232h224v40H188z" fill="url(#oro)"/>
+      <path d="M286 478h28v112h-28z" fill="url(#oro)"/>
+      <path d="M232 590h136l-16 56H248z" fill="url(#oro)"/>
+      <rect x="196" y="646" width="208" height="24" rx="6" fill="url(#oro)"/>
+
+      <rect x="176" y="670" width="248" height="150" rx="10" fill="#3b2416"/>
+      <rect x="216" y="706" width="168" height="82" rx="4" fill="url(#oro)"/>
+
+      <g fill="#fff" opacity="0.35">
+        <path d="M236 268h18v190c-11-16-18-42-18-78v-112Z"/>
+      </g>
+    </svg>
+  `);
+}

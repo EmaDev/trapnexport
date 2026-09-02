@@ -26,6 +26,7 @@ import {
 } from "@/components/atoms/icons";
 import { ClipRail } from "@/components/organisms/ClipCard";
 import { EraTimeline } from "@/components/organisms/EraTimeline";
+import { PalmaresRail } from "@/components/organisms/PalmaresRail";
 import { PlayerSpotlight } from "@/components/organisms/PlayerSpotlight";
 import { QuoteBlock } from "@/components/organisms/QuoteBlock";
 import { TrayectoriaPresentador } from "@/components/organisms/TrayectoriaPresentador";
@@ -278,22 +279,18 @@ export function HistoriaClient({ historia }: { historia: Historia }) {
           <p className="text-sm leading-relaxed text-muted">{club.intro}</p>
 
           {/* Palmarés. Va en el hero y no en una sección propia porque son
-              cuatro líneas: una sección con título para cuatro líneas es más
-              chrome que contenido. */}
-          <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-2xl border border-border">
-            {trophies.map((t) => (
-              <li key={t.id} className="flex items-center gap-3 px-4 py-3">
-                <TrophyIcon width={18} height={18} className="shrink-0 text-accent" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold">{t.name}</p>
-                  <p className="truncate text-xs text-muted">{t.years}</p>
-                </div>
-                <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-bold tabular-nums text-accent">
-                  ×{t.times}
-                </span>
-              </li>
-            ))}
-          </ul>
+              tres copas: una sección con título para tres copas es más chrome
+              que contenido. */}
+          <div className="flex flex-col gap-3">
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <TrophyIcon width={16} height={16} className="shrink-0 text-accent" />
+              Las copas
+              <span className="font-normal text-muted">
+                · tocá una para verla en grande
+              </span>
+            </p>
+            <PalmaresRail trophies={trophies} />
+          </div>
         </section>
 
         <ChipCarousel

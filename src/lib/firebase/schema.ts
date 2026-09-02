@@ -617,7 +617,7 @@ export interface HistoriaClubDoc {
   /** ruta o URL del escudo */
   crest: string;
   intro: string;
-  trophies: { id: string; name: string; times: number; years: string }[];
+  trophies: { id: string; name: string; times: number; years: string; photo: string }[];
   balance: { finales: number; ganadas: number; perdidas: number; estrellas: number };
   updatedAt: FsTimestamp;
 }

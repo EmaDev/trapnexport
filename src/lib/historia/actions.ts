@@ -278,6 +278,9 @@ export async function guardarClub(input: ClubInput): Promise<boolean> {
       name: text(t?.name, 120),
       times: num(t?.times, 1, 999, 1),
       years: text(t?.years, 80),
+      // Sin foto va "" y no se omite el campo: `PalmaresRail` cae en la copa
+      // generada, así que el vacío es un estado válido y no un dato faltante.
+      photo: src(t?.photo),
     })),
     balance: {
       finales: num(input.balance?.finales, 0, 999, 0),
