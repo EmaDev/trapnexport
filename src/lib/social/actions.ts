@@ -7,7 +7,7 @@ import { requireAdmin } from "@/lib/admin/auth";
 import { getCurrentUid } from "@/lib/auth/sesion";
 import { adminDb, borrarDelBucket } from "@/lib/firebase/admin";
 import { COL, SUB } from "@/lib/firebase/collections";
-import type { CommentDoc, PostDoc } from "@/lib/firebase/schema";
+import type { CommentDoc, GalleryDoc, PostDoc, UserDoc } from "@/lib/firebase/schema";
 import { getDirectorio } from "@/lib/social/directorio";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
 import { db, newId } from "@/lib/social/store";
@@ -210,15 +210,31 @@ export async function registerShare(postId: string): Promise<void> {
  *  Revalida `/u/[handle]` ademas del feed: el avatar viejo quedaria cacheado en
  *  el perfil publico de la misma persona.
  */
-export async function updateAvatar(src: string): Promise<void> {
+export async function updateAvatar(src: string, path?: string): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid || !src) return;
 
-  await adminDb()
-    .collection(COL.user)
-    .doc(uid)
-    .update({ avatar: src, updatedAt: FieldValue.serverTimestamp() })
+  const ref = adminDb().collection(COL.user).doc(uid);
+  const snap = await ref.get();
+  const anterior = (snap.data() as UserDoc | undefined)?.avatarPath;
+
+  await ref
+    .update({
+      avatar: src,
+      // `deleteField()` y no `undefined`: cambiar de una foto subida a un avatar
+      // generado tiene que **borrar** la ruta vieja, o el próximo cambio
+      // intentaría borrar un archivo que ya no le corresponde a este usuario.
+      avatarPath: path ?? FieldValue.delete(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
     .catch(() => {});
+
+  /*  La foto anterior se borra del bucket. Sin esto cada cambio de avatar deja
+   *  un archivo que nadie referencia y que no se puede encontrar después: el
+   *  nombre es al azar y la única pista era el `avatarPath` que se acaba de
+   *  pisar. Va después de la escritura: si se borrara antes y la escritura
+   *  fallara, la cuenta quedaría apuntando a un archivo inexistente. */
+  if (anterior && anterior !== path) await borrarDelBucket(anterior);
 
   const handle = await handleDe(uid);
 
@@ -316,19 +332,27 @@ export async function updateFicha(input: {
 export async function addGalleryItem(input: {
   kind: GalleryItem["kind"];
   src: string;
+  /** ruta en el bucket, para poder borrar el archivo con el documento */
+  path?: string;
   alt?: string;
 }): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid || !input.src) return;
   if (input.kind !== "image" && input.kind !== "video") return;
 
-  (db.gallery[uid] ??= []).push({
-    id: newId("g"),
+  const db2 = adminDb();
+  const userRef = db2.collection(COL.user).doc(uid);
+
+  const batch = db2.batch();
+  batch.set(userRef.collection(SUB.gallery).doc(), {
     kind: input.kind,
     src: input.src,
+    path: input.path ?? "",
     alt: input.alt?.trim().slice(0, 80) || (input.kind === "video" ? "Video" : "Foto"),
-    addedAt: Date.now(),
+    createdAt: FieldValue.serverTimestamp(),
   });
+  batch.update(userRef, { "stats.gallery": FieldValue.increment(1) });
+  await batch.commit();
 
   const handle = await handleDe(uid);
 
@@ -340,10 +364,22 @@ export async function removeGalleryItem(id: string): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
 
-  const carrete = db.gallery[uid];
-  if (!carrete) return;
+  const db2 = adminDb();
+  const userRef = db2.collection(COL.user).doc(uid);
+  const ref = userRef.collection(SUB.gallery).doc(id);
 
-  db.gallery[uid] = carrete.filter((g) => g.id !== id);
+  const snap = await ref.get();
+  const item = snap.data() as GalleryDoc | undefined;
+  // La ruta es la única forma de encontrar el archivo: el nombre es al azar.
+  // Hay que leerla ANTES de borrar el documento.
+  if (!item) return;
+
+  const batch = db2.batch();
+  batch.delete(ref);
+  batch.update(userRef, { "stats.gallery": FieldValue.increment(-1) });
+  await batch.commit();
+
+  if (item.path) await borrarDelBucket(item.path);
 
   const handle = await handleDe(uid);
 

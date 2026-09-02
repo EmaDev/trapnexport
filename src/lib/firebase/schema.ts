@@ -196,11 +196,11 @@ export interface UserPrivateDoc {
  *  el tope de 1 MB del documento apenas se suben dos fotos.
  */
 export interface GalleryDoc {
-  id: string;
   kind: "image" | "video";
   /** URL pública de Storage */
   src: string;
-  /** ruta en el bucket, para poder borrar el archivo junto con el documento */
+  /** ruta en el bucket, para poder borrar el archivo junto con el documento.
+   *  Cadena vacía en un item que no vino de una subida. */
   path: string;
   alt: string;
   createdAt: FsTimestamp;

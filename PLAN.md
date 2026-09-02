@@ -264,34 +264,43 @@ el archivo del feed y no en el del panel, así que se saltearon el
 `requireAdmin()` que tiene el resto de la moderación — cualquiera podía ocultar o
 borrar la publicación de cualquiera con un POST. Ahora lo exigen.
 
-### Fase 4 — Avatares y carrete a Storage
+### Fase 4 — Avatares y carrete a Storage · **hecha**
 
-Más chica de lo que era: `lib/storage/imagen.ts` ya existe y es el motor común
-(`comprimirImagen`, `subirImagen`, `borrarImagen`) que usan el compositor del
-feed y el panel de la historia. Lo que falta es engancharlo, no escribirlo.
+Más chica de lo que era, porque `lib/storage/imagen.ts` ya existía como motor
+común. Lo que hubo que sumarle es `subirArchivo`, que sube sin comprimir: es
+para el video del carrete, que no se puede recomprimir en el navegador sin traer
+un transcoder entero.
 
-- `lib/media-upload.ts` deja de producir data-URIs y llama a `subirImagen` con
-  su propia carpeta. Su encabezado ya anticipó el cambio: *"las firmas no
-  cambian: los componentes ya reciben un string y no saben si es data-URI o
-  URL"*.
-- El carrete pasa del array `User.gallery` a la subcolección
-  `trapnexport-user/{uid}/gallery/{id}` — `GalleryDoc` ya está definido, y la
-  razón también: un array embebido se relee entero en cada lectura del perfil
-  *y del feed*, y choca contra el tope de 1 MB del documento con dos fotos.
-- `UserDoc.avatarPath` empieza a usarse: sin eso, cambiar la foto deja la
-  anterior huérfana en el bucket para siempre.
-- **Cerrar la escritura de `storage.rules`.** Hoy las dos carpetas
-  (`trapnexport-post/`, `trapnexport-historia/`) tienen
-  `allow create, update` acotado sólo por tamaño y content-type, sin mirar
-  `request.auth`: con la config pública del proyecto, cualquiera deposita
-  archivos ahí. El comentario de la regla lo asume inevitable porque *"el panel
-  se autentica con la cookie de sesión, no con Firebase Auth en el navegador,
-  así que desde acá no hay `request.auth` que mirar"* — pero el login del panel
-  **sí** pasa por Firebase Auth en el cliente antes de canjear la cookie, y el
-  compositor del feed también. El claim está disponible; la regla puede exigir
-  `signedIn()` para el feed y `request.auth.token.admin == true` para la
-  historia, que es lo que la propia regla se deja anotado como paso siguiente.
-  `allow delete: if true` tiene el mismo problema y el mismo arreglo.
+- `lib/media-upload.ts` dejó de producir data-URIs. Ahora expone `uploadAvatar`
+  y `uploadMedia`, que suben al bucket y devuelven `{ src, path }`. Por la
+  Server Action viaja sólo eso.
+- El carrete pasó del mapa en memoria a `trapnexport-user/{uid}/gallery/{id}`.
+- **`UserDoc.avatarPath` empezó a usarse**, y con él el borrado de la foto
+  anterior: sin eso cada cambio de avatar dejaba un archivo que nadie
+  referenciaba y que ya no se podía encontrar, porque el nombre es al azar y la
+  única pista era el `avatarPath` que se acababa de pisar. Volver a un avatar
+  generado borra el campo con `deleteField()`, no lo deja en `undefined`.
+- `stats.gallery` se mueve con `increment`, en el mismo lote que el alta o la
+  baja.
+
+**`storage.rules` cerrado.** Era lo más grave que quedaba: las dos carpetas
+tenían `allow create, update` acotado sólo por tamaño y content-type, y
+`allow delete: if true`, sin mirar `request.auth` — con la configuración pública
+del proyecto, que viaja en el bundle como corresponde, cualquiera podía llenar o
+vaciar el bucket. El comentario de la regla lo daba por inevitable porque *"el
+panel se autentica con la cookie de sesión, no con Firebase Auth en el
+navegador"*; es cierto que la cookie es lo que valida el servidor, pero el login
+del panel pasa por Firebase Auth en el cliente antes de canjearla, así que el
+token existe y el claim también.
+
+Ahora: el `{userId}` del path es lo que exige que cada quien escriba en su propia
+carpeta, la historia del club pide el claim `admin`, el borrado es del dueño o
+del panel, y hay un `match /{allPaths=**}` que cierra todo lo demás.
+
+**Consecuencia a tener en cuenta:** subir al panel de historia ahora requiere que
+el navegador tenga sesión de Firebase Auth con el claim, no sólo la cookie. Es lo
+correcto, pero si alguien queda con la cookie viva y la sesión del cliente caída,
+las subidas fallan con "tu sesión venció" en vez de funcionar.
 
 ### Fase 5 — Chat: rediseño
 

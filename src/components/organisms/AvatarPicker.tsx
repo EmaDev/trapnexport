@@ -5,7 +5,7 @@ import { BottomSheet, Button, useSnackbar } from "lib-kit-components";
 
 import { CameraIcon, CheckIcon, ImageIcon } from "@/components/atoms/icons";
 import { avatarUrl } from "@/lib/media";
-import { readImage } from "@/lib/media-upload";
+import { uploadAvatar } from "@/lib/media-upload";
 import { updateAvatar } from "@/lib/social/actions";
 
 /** Foto de perfil con selector.
@@ -44,21 +44,25 @@ export function AvatarPicker({
 
   const presets = Array.from({ length: 12 }, (_, i) => avatarUrl(name, `${handle}-v${i}`));
 
-  const commit = (next: string) => {
+  /*  `path` sólo lo trae la foto subida: los presets son avatares generados por
+   *  `avatarUrl` y no son un archivo del bucket. Sin él, `updateAvatar` borra el
+   *  `avatarPath` guardado — que es lo correcto, porque volver a un preset deja
+   *  la foto anterior sin nadie que la referencie. */
+  const commit = (next: string, path?: string) => {
     setShown(next);
-    startTransition(() => void updateAvatar(next));
+    startTransition(() => void updateAvatar(next, path));
   };
 
   const pick = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true);
     try {
-      const res = await readImage(file);
+      const res = await uploadAvatar(file);
       if (!res.ok) {
         snack({ message: res.error, variant: "error" });
         return;
       }
-      commit(res.src);
+      commit(res.src, res.path);
       setOpen(false);
       snack({ message: "Foto de perfil actualizada" });
     } finally {

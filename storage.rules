@@ -1,51 +1,101 @@
 rules_version = '2';
 
-// Reglas de Firebase Storage. Se despliegan con `firebase deploy --only storage`.
+/*  Reglas de Firebase Storage. Se despliegan con `firebase deploy --only storage`.
+ *
+ *  Todo lo que se sube acá lo sube **el navegador**, con el SDK del cliente, así
+ *  que estas reglas son la validación de verdad y no una segunda barrera detrás
+ *  de otra cosa. El servidor sólo borra (`borrarDelBucket` en
+ *  `lib/firebase/admin.ts`, con credenciales de servicio, que se saltea todo
+ *  esto).
+ *
+ *  **La escritura pide sesión.** Antes no: las reglas acotaban tamaño y tipo
+ *  pero no miraban `request.auth`, con lo cual cualquiera con la configuración
+ *  pública del proyecto —que viaja en el bundle, como corresponde— podía llenar
+ *  el bucket. El comentario que había asumía que el panel no tenía token porque
+ *  se autentica con una cookie de sesión; es cierto que la cookie es lo que
+ *  valida el servidor, pero el login del panel pasa por Firebase Auth en el
+ *  navegador antes de canjearla, así que el token existe y el claim también.
+ *
+ *  La lectura sí es pública en todo: son fotos de un feed y de la historia de un
+ *  club, y las URLs de descarga ya son links compartibles.
+ */
 service firebase.storage {
   match /b/{bucket}/o {
 
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.admin == true;
+    }
+
+    /** Una imagen razonable: hasta `mb` megas y con tipo de imagen. Acota qué se
+     *  puede depositar, para que el bucket no sea un disco gratis. */
+    function esImagen(mb) {
+      return request.resource.size < mb * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
     // Imágenes de las publicaciones del feed (`lib/storage/post-image.ts`).
     //
-    // Son contenido público y no sensible: cualquiera las lee. La escritura hoy
-    // es abierta porque el feed corre sobre la cuenta semilla, sin Firebase
-    // Auth — pero acotada a imágenes de hasta 3 MB para que el bucket no se use
-    // como depósito de archivos arbitrarios. El compositor ya sube WebP de
-    // 80–160 KB; el margen es para no rechazar un caso raro.
-    //
-    // Cuando el feed pase a auth real: cambiar la condición por
-    // `request.auth != null && request.auth.uid == userId` en create, y dejar
-    // el delete atado al mismo dueño.
+    // El `{userId}` del path no es decorativo: es lo que permite exigir que cada
+    // quien escriba en su propia carpeta. El uploader ya sube WebP de 80–160 KB;
+    // los 3 MB son margen para un caso raro.
     match /trapnexport-post/{userId}/{fileName} {
       allow read: if true;
+      allow create, update: if isSelf(userId) && esImagen(3);
+      // El dueño borra lo suyo; el panel borra cualquiera, porque moderar
+      // incluye eliminar la publicación de otro con sus fotos.
+      allow delete: if isSelf(userId) || isAdmin();
+    }
 
-      allow create, update: if request.resource.size < 3 * 1024 * 1024
-                            && request.resource.contentType.matches('image/.*');
+    // Fotos de perfil (`lib/media-upload.ts` → `uploadAvatar`).
+    //
+    // Se comprimen a 512 px de lado largo, que es todo lo que necesita un avatar
+    // de 80 px en pantallas densas.
+    match /trapnexport-avatar/{userId}/{fileName} {
+      allow read: if true;
+      allow create, update: if isSelf(userId) && esImagen(3);
+      allow delete: if isSelf(userId) || isAdmin();
+    }
 
-      allow delete: if true;
+    // Carrete personal del perfil (`lib/media-upload.ts` → `uploadMedia`).
+    //
+    // Es la única carpeta que acepta video, y por eso es la única con un tope
+    // grande: un video no se puede recomprimir en el navegador sin traer un
+    // transcoder entero, así que lo único que se puede hacer es acotarlo.
+    match /trapnexport-carrete/{userId}/{fileName} {
+      allow read: if true;
+      allow create, update: if isSelf(userId)
+                            && request.resource.size < 25 * 1024 * 1024
+                            && (request.resource.contentType.matches('image/.*')
+                                || request.resource.contentType.matches('video/.*'));
+      allow delete: if isSelf(userId) || isAdmin();
     }
 
     // Imágenes de la historia del club, subidas desde `/admin/historia`
     // (`lib/storage/historia-image.ts`): escudo, fotos de etapas, portadas de
     // temporada, retratos, museo y pósters de clips.
     //
-    // Son contenido público del club: cualquiera las lee, igual que las del
-    // feed. La escritura tampoco pide token, y el motivo es concreto: el panel
-    // se autentica con la cookie de sesión que verifica el servidor
-    // (`lib/admin/auth.ts`), no con Firebase Auth en el navegador, así que
-    // desde acá no hay `request.auth` que mirar. Lo que sí se acota es qué se
-    // puede depositar: imágenes de hasta 4 MB. El uploader ya sube WebP de
-    // 100–300 KB; el margen es para no rechazar un caso raro.
-    //
-    // El día que el panel inicie sesión con Firebase Auth en el cliente, esto
-    // pasa a `request.auth.token.admin == true`, que es el mismo claim que ya
-    // exige `requireAdmin()`.
+    // No llevan `{userId}`: no son de nadie, son del club. Por eso el corte es
+    // el claim `admin` —el mismo que exige `requireAdmin()` del otro lado— y no
+    // la identidad del que sube.
     match /trapnexport-historia/{fileName} {
       allow read: if true;
+      allow create, update: if isAdmin() && esImagen(4);
+      allow delete: if isAdmin();
+    }
 
-      allow create, update: if request.resource.size < 4 * 1024 * 1024
-                            && request.resource.contentType.matches('image/.*');
-
-      allow delete: if true;
+    // Nada fuera de las carpetas de arriba. Sin esto, una carpeta nueva escrita
+    // por error queda sin regla y Storage la deniega igual — pero explícito se
+    // lee mejor que por descarte.
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

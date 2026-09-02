@@ -140,6 +140,31 @@ export async function subirImagen(
   return { src: await getDownloadURL(objeto), path, size: blob.size };
 }
 
+/** Sube un archivo **tal cual**, sin comprimirlo ni mirarle el tipo.
+ *
+ *  Existe para el video del carrete. Un video no se puede recomprimir en el
+ *  navegador sin traer un transcoder entero, así que lo único que se puede hacer
+ *  es acotarlo por tamaño —y eso lo decide quien llama, que sabe de qué se
+ *  trata—. Para imágenes está `subirImagen`, que sí comprime: usar ésta con una
+ *  foto de celular sube ocho megas al bucket.
+ */
+export async function subirArchivo(
+  file: File,
+  { carpeta, porUsuario = false }: { carpeta: string; porUsuario?: boolean },
+): Promise<ImagenSubida> {
+  const uid = auth.currentUser?.uid ?? "anon";
+  const ext = file.name.split(".").pop()?.toLowerCase().slice(0, 5) || "bin";
+  const path = [carpeta, porUsuario ? uid : null, nombreAzar(ext)].filter(Boolean).join("/");
+  const objeto = ref(storage, path);
+
+  await uploadBytes(objeto, file, {
+    contentType: file.type || "application/octet-stream",
+    cacheControl: "public, max-age=31536000, immutable",
+  });
+
+  return { src: await getDownloadURL(objeto), path, size: file.size };
+}
+
 /** Borra un archivo subido. Best-effort: si ya no está —o las reglas no dejan—
  *  no es un error que deba frenar nada, sólo queda un huérfano en el bucket. */
 export async function borrarImagen(path: string): Promise<void> {

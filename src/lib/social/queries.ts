@@ -4,7 +4,13 @@ import { cache } from "react";
 import { getCurrentUid } from "@/lib/auth/sesion";
 import { adminDb } from "@/lib/firebase/admin";
 import { COL, SUB } from "@/lib/firebase/collections";
-import type { CommentDoc, FsTimestamp, NotificacionDoc, PostDoc } from "@/lib/firebase/schema";
+import type {
+  CommentDoc,
+  FsTimestamp,
+  GalleryDoc,
+  NotificacionDoc,
+  PostDoc,
+} from "@/lib/firebase/schema";
 import { getDirectorio, type Directorio } from "@/lib/social/directorio";
 import { db } from "@/lib/social/store";
 import type { GalleryItem, NotificationKind, PlayerFicha } from "@/lib/social/types";
@@ -346,13 +352,31 @@ export async function getPostsByHandle(handle: string): Promise<PostVM[]> {
 
 /* ── perfiles ────────────────────────────────────────────────────────────── */
 
-/** El carrete de una cuenta.
+/** El carrete de una cuenta, de lo más nuevo a lo más viejo.
  *
- *  Todavía en memoria, en un mapa por uid. La subcolección
- *  `trapnexport-user/{uid}/gallery` está definida en el schema (`GalleryDoc`)
- *  pero se llena en la Fase 4, junto con la subida a Storage: hoy los items son
- *  data-URIs y no pueden entrar a un documento de Firestore. */
-const galeriaDe = (uid: string): GalleryItem[] => db.gallery[uid] ?? [];
+ *  Subcolección y no un array dentro del `UserDoc`: un array embebido se relee
+ *  entero en cada lectura del perfil **y del feed**, que lee el mismo documento
+ *  para sacar el autor de cada publicación, y choca contra el tope de 1 MB del
+ *  documento. */
+async function galeriaDe(uid: string): Promise<GalleryItem[]> {
+  const snap = await adminDb()
+    .collection(COL.user)
+    .doc(uid)
+    .collection(SUB.gallery)
+    .orderBy("createdAt", "desc")
+    .get();
+
+  return snap.docs.map((d) => {
+    const g = d.data() as GalleryDoc;
+    return {
+      id: d.id,
+      kind: g.kind,
+      src: g.src,
+      alt: g.alt,
+      addedAt: aMillis(g.createdAt),
+    };
+  });
+}
 
 export async function getProfile(handle: string): Promise<ProfileVM | null> {
   const [viewerId, dir] = await Promise.all([getCurrentUid(), getDirectorio()]);
@@ -361,12 +385,15 @@ export async function getProfile(handle: string): Promise<ProfileVM | null> {
 
   // Contar publicaciones, no traerlas: la pantalla ya las pide por su cuenta con
   // `getPostsByHandle` y acá sólo se necesita el número.
-  const cuenta = await adminDb()
-    .collection(COL.post)
-    .where("authorId", "==", u.id)
-    .where("hidden", "==", false)
-    .count()
-    .get();
+  const [cuenta, gallery] = await Promise.all([
+    adminDb()
+      .collection(COL.post)
+      .where("authorId", "==", u.id)
+      .where("hidden", "==", false)
+      .count()
+      .get(),
+    galeriaDe(u.id),
+  ]);
 
   return {
     id: u.id,
@@ -380,7 +407,7 @@ export async function getProfile(handle: string): Promise<ProfileVM | null> {
     isMe: u.id === viewerId,
     stats: { posts: cuenta.data().count },
     ficha: u.ficha,
-    gallery: [...galeriaDe(u.id)].sort((a, b) => b.addedAt - a.addedAt),
+    gallery,
   };
 }
 

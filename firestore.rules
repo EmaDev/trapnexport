@@ -105,10 +105,16 @@ service cloud.firestore {
         allow read, write: if isSelf(uid);
       }
 
-      /*  El carrete personal: se ve en el perfil público, lo escribe el dueño. */
+      /*  El carrete personal: se ve en el perfil público.
+       *
+       *  Lo escribe el servidor (`addGalleryItem` / `removeGalleryItem`), no el
+       *  navegador, porque cada alta y cada baja mueven además `stats.gallery`
+       *  de la cuenta, y `stats` es de sólo lectura para su dueño a propósito.
+       *  El archivo sí lo sube el navegador directo al bucket; lo que pasa por
+       *  el servidor es el documento con la URL. */
       match /gallery/{itemId} {
         allow read: if true;
-        allow create, update, delete: if isSelf(uid) || isAdmin();
+        allow write: if false;
       }
 
       /*  Las publicaciones guardadas. A diferencia del carrete, esto NO es

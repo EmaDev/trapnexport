@@ -4,7 +4,7 @@ import { useOptimistic, useRef, useState, useTransition } from "react";
 import { Button, Card, useSnackbar } from "lib-kit-components";
 
 import { PlusIcon, TrashIcon, VideoIcon } from "@/components/atoms/icons";
-import { MAX_VIDEO_BYTES, readMedia } from "@/lib/media-upload";
+import { MAX_VIDEO_BYTES, uploadMedia } from "@/lib/media-upload";
 import { addGalleryItem, removeGalleryItem } from "@/lib/social/actions";
 import type { GalleryItem } from "@/lib/social/types";
 
@@ -43,12 +43,19 @@ export function PersonalMediaUploader({ items }: { items: GalleryItem[] }) {
     setSubiendo(true);
 
     try {
-      // Primero se leen y se validan todos los archivos: lo que falla avisa
-      // ahora, antes de que empiece a subir nada.
-      const listos: { kind: GalleryItem["kind"]; src: string; alt: string }[] = [];
+      // Cada archivo se sube al bucket acá mismo; lo que falla avisa por su
+      // nombre y no frena a los demás. Lo que queda en `listos` es lo que ya
+      // está arriba: URL pública más la ruta, que es lo único que viaja después
+      // por la Server Action.
+      const listos: {
+        kind: GalleryItem["kind"];
+        src: string;
+        path: string;
+        alt: string;
+      }[] = [];
 
       for (const file of Array.from(files)) {
-        const res = await readMedia(file);
+        const res = await uploadMedia(file);
         if (!res.ok) {
           snack({ message: `${file.name}: ${res.error}`, variant: "error" });
           continue;
@@ -56,6 +63,7 @@ export function PersonalMediaUploader({ items }: { items: GalleryItem[] }) {
         listos.push({
           kind: res.kind ?? "image",
           src: res.src,
+          path: res.path,
           alt: file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Sin titulo",
         });
       }
@@ -63,11 +71,20 @@ export function PersonalMediaUploader({ items }: { items: GalleryItem[] }) {
 
       startTransition(async () => {
         for (const [i, m] of listos.entries()) {
-          aplicar({ tipo: "alta", item: { id: `tmp_${Date.now()}_${i}`, addedAt: Date.now(), ...m } });
+          aplicar({
+            tipo: "alta",
+            item: {
+              id: `tmp_${Date.now()}_${i}`,
+              addedAt: Date.now(),
+              kind: m.kind,
+              src: m.src,
+              alt: m.alt,
+            },
+          });
         }
-        // En serie y no en paralelo: cada subida es un POST con el data-URI
-        // adentro, y mandarlas todas juntas es justo lo que el
-        // `bodySizeLimit` de la action existe para frenar.
+        // En serie y no en paralelo: son escrituras que además mueven el
+        // contador `stats.gallery` de la misma cuenta, y lanzarlas todas juntas
+        // es pelearse por el mismo documento.
         for (const m of listos) await addGalleryItem(m);
       });
     } finally {
