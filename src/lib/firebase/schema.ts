@@ -280,6 +280,31 @@ export interface EncuestaDoc {
   createdAt: FsTimestamp;
 }
 
+/* ── trapnexport-encuesta/{id}/voto/{uid} ────────────────────────────────── */
+
+/** Lo que votó una persona en una encuesta.
+ *
+ *  **El id del documento es el uid**, y eso es todo el mecanismo de dedupe:
+ *  Firestore no tiene índices únicos, así que la forma de garantizar un voto por
+ *  cuenta es que el segundo voto caiga sobre el mismo documento que el primero.
+ *  Es la misma idea que `trapnexport-handle` usa para los nombres de usuario.
+ *
+ *  Guarda el voto y no sólo "ya votó" porque el contador de `OpcionEncuestaDoc`
+ *  hay que poder **corregirlo**: cambiar de opción tiene que restar de la
+ *  anterior, y para eso el servidor necesita saber cuál era sin preguntarle al
+ *  navegador, que puede mentir o simplemente haberlo olvidado al recargar.
+ *
+ *  Los votos anteriores al dedupe no tienen documento. Por eso el descuento
+ *  nunca baja de cero: hay conteos viejos que no tienen a quién devolvérselos.
+ */
+export interface VotoDoc {
+  /** ids de `OpcionEncuestaDoc`; uno solo salvo que la encuesta sea `multiple` */
+  opciones: string[];
+  /** la primera vez que votó; no se pisa al cambiar el voto */
+  createdAt: FsTimestamp;
+  updatedAt: FsTimestamp;
+}
+
 /** `trapnexport-invitacion/{id}`. Refleja `Invitacion`.
  *
  *  `code` es lo que va en la URL pública `/invitacion/:code`; se consulta por

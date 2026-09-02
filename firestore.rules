@@ -175,6 +175,19 @@ service cloud.firestore {
      *  existe se cierra a propósito, no por descarte. */
     match /trapnexport-noticia/{id}    { allow read, write: if false; }
     match /trapnexport-encuesta/{id}   { allow read, write: if false; }
+
+    /*  Los votos: un documento por persona bajo cada encuesta, con el uid de
+     *  id. Lo escribe el servidor (`lib/contenido/voto.ts`, con el uid sacado de
+     *  la cookie de sesión) dentro de la misma transacción que mueve los
+     *  contadores, así que las dos mitades del voto entran o no entran juntas.
+     *
+     *  Cerrado también para su dueño, y a propósito: el documento no es un dato
+     *  de la persona, es el comprobante que impide que vote dos veces. Si el
+     *  cliente pudiera escribirlo, borrarlo sería votar de nuevo.
+     *
+     *  Va explícito aunque el catch-all del final ya lo cubriría: una regla que
+     *  se apoya en el descarte se pierde el día que alguien afloja el catch-all. */
+    match /trapnexport-encuesta/{id}/voto/{uid} { allow read, write: if false; }
     match /trapnexport-invitacion/{id} { allow read, write: if false; }
     match /trapnexport-evento/{id}     { allow read, write: if false; }
     match /trapnexport-config/{id}     { allow read, write: if false; }

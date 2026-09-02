@@ -270,20 +270,14 @@ export function FeedTabs({
       return;
     }
 
-    // El token de Firebase con el que la Server Action confirma quién vota.
-    let idToken: string;
-    try {
-      idToken = await user.getIdToken();
-    } catch {
-      rechazar(encuestaId);
-      snack({ message: "No pudimos validar tu sesión. Volvé a iniciar sesión.", variant: "error" });
-      return;
-    }
-
     const previos = answers[encuestaId] ?? [];
     setAnswers((prev) => ({ ...prev, [encuestaId]: ids }));
 
-    const r = await votarEncuesta(encuestaId, ids, previos, idToken);
+    // Sin token ni voto anterior: los dos los pone el servidor. Quién vota sale
+    // de la cookie de sesión, y qué había votado antes sale de su documento en
+    // `trapnexport-encuesta/{id}/voto/{uid}` — mandarlo desde acá era pedirle al
+    // navegador un dato que se pierde al recargar y que se puede falsear.
+    const r = await votarEncuesta(encuestaId, ids);
     if (!r.ok) {
       rechazar(encuestaId);
       // Revertir al voto que había antes: si no, la tarjeta muestra "Votado"

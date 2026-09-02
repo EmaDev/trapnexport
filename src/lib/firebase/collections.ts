@@ -70,6 +70,15 @@ export const CONFIG_CRONOGRAMA = "cronograma";
  */
 export const HISTORIA_CLUB = "club";
 
+/** La subcolección de votos de una encuesta: `trapnexport-encuesta/{id}/voto/{uid}`.
+ *
+ *  Un documento por persona, con el uid de Firebase Auth como id. Que el id sea
+ *  el uid **es** el dedupe: Firestore no tiene índices únicos, así que la única
+ *  forma de garantizar un voto por cuenta es que el segundo voto caiga sobre el
+ *  mismo documento que el primero. Ver `VotoDoc` y `lib/contenido/voto.ts`.
+ */
+export const SUB_VOTO = "voto";
+
 /** Subcolecciones de `trapnexport-user/{uid}`.
  *
  *  No llevan prefijo: ya están namespaceadas por el documento padre, y
