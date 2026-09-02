@@ -120,42 +120,58 @@ Fase 1  sesión ──┼─→ Fase 2  identidad ─┬─→ Fase 3  posts/com
 
 ---
 
-### Fase 0 — Higiene
+### Fase 0 — Higiene · **hecha**
 
-Chica, pero primero: el working tree está sucio y confunde el punto de partida.
+Chica, pero primero: el working tree estaba sucio y confundía el punto de partida.
 
-- Commitear el endurecimiento del voto que ya está hecho y sin commitear
-  (`votarEncuesta` verificando `idToken`, `FeedTabs` con el contador `rechazos`
-  que remonta el `<Poll>` cuando el servidor rechaza).
-- Sacar `scratch_seed_body.ts` (48 KB sin trackear) del repo.
-- Apuntar la sección *Qué falta* del README a este archivo.
+- El árbol se separó en tres commits (`d681cba` la historia del club a Firestore,
+  `947b623` el endurecimiento del voto, `cfc182a` esta documentación) en la rama
+  `plan-migracion`.
+- `scratch_seed_body.ts` ya no estaba: se había borrado antes.
+- La sección *Qué falta* del README apunta a este archivo.
 
-### Fase 1 — La sesión del servidor
+### Fase 1 — La sesión del servidor · **hecha**
 
 El cimiento. Sin esto ninguna fase posterior sabe quién es el usuario.
 
-- **Generalizar el canje de token.** `/api/admin/session` ya hace todo el
-  trabajo (verifica, chequea el claim, emite `createSessionCookie`, revoca en
-  el `DELETE`). Se extrae el flujo a `/api/session` y la variante admin queda
-  como el mismo endpoint con el chequeo de claim extra.
-- **`sameSite` distinto según el módulo.** El panel usa `strict` y está bien:
-  nadie llega a `/admin` desde un link externo. El público **no puede** usar
-  `strict`: compartir `/post/:id` por WhatsApp abriría la app sin sesión en la
-  primera navegación. Va `lax`.
-- **`lib/session.ts` pasa a tener una mitad servidor**: `getCurrentUid()`
-  (devuelve `null` sin sesión, para las pantallas públicas) y `requireUid()`
-  (corta, para las actions). Mismo par que `getAdminSession` / `requireAdmin`,
-  y por el mismo motivo: una Server Action es un POST invocable sin pasar por
-  ninguna pantalla.
-- **Login, alta y logout escriben y borran la cookie.** Incluye el retorno de
-  `signInWithRedirect` de Google, que hoy vuelve por `onAuthStateChanged`.
-- **Refresco.** La cookie dura 5 días (máximo de `createSessionCookie`); un
-  `onIdTokenChanged` la vuelve a canjear antes de que expire.
+- **El canje se generalizó.** Todo el mecanismo vive ahora en
+  `lib/auth/sesion.ts` —emitir, cerrar, verificar, `getCurrentUid()` y
+  `requireUid()`— y las dos rutas son cáscaras: `/api/session` emite a cualquier
+  cuenta con sesión válida, `/api/admin/session` es la misma llamada con
+  `{ exigirAdmin: true }`. `lib/admin/auth.ts` dejó de tener su propia copia de
+  la verificación y ahora sólo aporta el chequeo del claim.
+- **`sameSite: lax` para los dos módulos.** Acá el plan estaba mal: decía
+  `strict` para el panel y `lax` para el feed, y eso es imposible — hay **una
+  sola cookie**, así que tiene un solo `sameSite`. Gana el caso que se rompe:
+  con `strict`, abrir un `/post/:id` compartido por WhatsApp llega sin cookie y
+  la persona ve su propia app deslogueada. `lax` tampoco viaja en un POST
+  cross-site, que es lo que `strict` protegía de verdad.
+- **La cookie se mantiene sola desde `AuthProvider`**, no desde las pantallas de
+  login. Hay tres puertas de entrada —email, registro y Google— más el retorno
+  de `signInWithRedirect`, que no pasa por ninguna pantalla; en cada una habría
+  que acordarse. El listener pasó de `onAuthStateChanged` a `onIdTokenChanged`,
+  que además avisa cuando Firebase rota el token cada hora: esa rotación es el
+  momento de renovar la cookie, y es lo que hace que una sesión de cinco días no
+  se caiga sola.
+- **`loading` ahora espera también a la cookie.** Sin eso las pantallas de login
+  navegan a un Server Component que todavía no la ve, y arma la pantalla como si
+  no hubiera sesión: se ve deslogueado hasta recargar a mano. El canje y la
+  primera lectura del perfil salen juntos, así que se espera el más lento de los
+  dos y no la suma. Con tope de 8 s, o un request colgado dejaría la app en el
+  splash para siempre.
+- **Salir cierra las dos mitades.** `PerfilClient` ahora borra la cookie y
+  espera la respuesta antes de `signOut` y de navegar, igual que ya hacía
+  `SalirDelPanel`: dejarlo sólo en manos del listener es una promesa suelta que
+  puede no haber terminado cuando el servidor arma la pantalla siguiente.
 
 **Primera prueba del mecanismo, en la superficie más chica:** el dedupe de votos.
-`voto.ts` deja de recibir `idToken` por parámetro, lee el uid de la cookie y
-ancla el voto a la persona — que es el "próximo paso" que el propio archivo se
-dejó anotado. Hoy recargar y volver a votar suma de más.
+`votarEncuesta` perdió los parámetros `idToken` y `previos` — los dos los pone
+ahora el servidor. El voto de cada persona es un documento en
+`trapnexport-encuesta/{id}/voto/{uid}`, y que el id **sea** el uid es todo el
+dedupe: Firestore no tiene índices únicos, así que la única forma de garantizar
+un voto por cuenta es que el segundo caiga sobre el mismo documento que el
+primero. De paso, votar dos veces lo mismo dejó de hacer nada, y cambiar de
+opción resta de la opción vieja aunque hayas recargado.
 
 ### Fase 2 — Identidad única sobre el uid
 
