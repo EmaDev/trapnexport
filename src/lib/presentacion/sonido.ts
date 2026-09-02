@@ -111,6 +111,14 @@ const NOMINADOS: Paso[] = [
 
 /* ── el motor ────────────────────────────────────────────────────────────── */
 
+/** El volumen de la música cuando nadie habla encima. */
+const VOLUMEN = 0.9;
+
+/** Cuánto queda de la música mientras habla el locutor. Un cuarto y no cero:
+ *  los aplausos de fondo son parte del anuncio; lo que no puede pasar es que le
+ *  ganen al nombre. */
+const VOLUMEN_ATENUADO = 0.22;
+
 export interface MotorSonido {
   /** crea y despierta el contexto; llamalo desde un handler de click */
   desbloquear: () => void;
@@ -118,6 +126,8 @@ export interface MotorSonido {
   /** corta lo que esté sostenido (el redoble) con un fundido corto */
   detener: () => void;
   silenciar: (valor: boolean) => void;
+  /** baja la música mientras habla el locutor y la devuelve al soltarla */
+  atenuar: (valor: boolean) => void;
   cerrar: () => void;
 }
 
@@ -129,6 +139,7 @@ const MUDO: MotorSonido = {
   reproducir: () => {},
   detener: () => {},
   silenciar: () => {},
+  atenuar: () => {},
   cerrar: () => {},
 };
 
@@ -146,6 +157,7 @@ export function crearMotorSonido(): MotorSonido {
   let master: GainNode | null = null;
   let ruido: AudioBuffer | null = null;
   let silencio = false;
+  let atenuado = false;
 
   /** Lo que está sonando en loop (hoy: el redoble). Se guarda para poder
    *  cortarlo desde afuera cuando el presentador avanza. */
@@ -164,11 +176,28 @@ export function crearMotorSonido(): MotorSonido {
     return buf;
   };
 
+  /** Lleva el volumen general a donde corresponda según el silencio y la
+   *  atenuación.
+   *
+   *  Las dos cosas empujan el mismo `master.gain`, así que tienen que resolverse
+   *  en un solo lugar: con un `setValueAtTime` por cada una, silenciar mientras
+   *  el locutor habla y que el locutor termine después dejaría la música al 90%
+   *  con el botón de silencio activado.
+   */
+  const aplicarVolumen = (rampa: number) => {
+    if (!master || !ctx) return;
+    const t = ctx.currentTime;
+    const destino = silencio ? 0 : atenuado ? VOLUMEN_ATENUADO : VOLUMEN;
+    master.gain.cancelScheduledValues(t);
+    master.gain.setValueAtTime(master.gain.value, t);
+    master.gain.linearRampToValueAtTime(destino, t + rampa);
+  };
+
   const desbloquear = () => {
     if (!ctx) {
       ctx = new Ctor();
       master = ctx.createGain();
-      master.gain.value = 0.9;
+      master.gain.value = silencio ? 0 : VOLUMEN;
       master.connect(ctx.destination);
     }
     // `resume()` sólo tiene efecto dentro del gesto que lo llama; el `void` es
@@ -468,12 +497,15 @@ export function crearMotorSonido(): MotorSonido {
   const silenciar = (valor: boolean) => {
     silencio = valor;
     if (valor) detener();
-    if (master && ctx) {
-      const t = ctx.currentTime;
-      master.gain.cancelScheduledValues(t);
-      master.gain.setValueAtTime(master.gain.value, t);
-      master.gain.linearRampToValueAtTime(valor ? 0 : 0.9, t + 0.15);
-    }
+    aplicarVolumen(0.15);
+  };
+
+  /** Baja rápido y sube lento, que es como duckea cualquier consola: la bajada
+   *  tiene que llegar antes que la primera sílaba, y la subida no puede saltar
+   *  encima de la última. */
+  const atenuar = (valor: boolean) => {
+    atenuado = valor;
+    aplicarVolumen(valor ? 0.12 : 0.6);
   };
 
   const cerrar = () => {
@@ -487,5 +519,5 @@ export function crearMotorSonido(): MotorSonido {
     if (c) window.setTimeout(() => void c.close().catch(() => {}), 400);
   };
 
-  return { desbloquear, reproducir, detener, silenciar, cerrar };
+  return { desbloquear, reproducir, detener, silenciar, atenuar, cerrar };
 }

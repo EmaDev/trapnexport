@@ -19,6 +19,7 @@ import {
   usePantallaCompleta,
 } from "@/lib/presentacion/pantalla";
 import { crearMotorSonido, type MotorSonido } from "@/lib/presentacion/sonido";
+import { crearLocutor, type Locutor } from "@/lib/presentacion/voz";
 import { Fondo, Placa } from "./Placas";
 
 /** El presentador: la pantalla completa que se proyecta en la gala.
@@ -50,6 +51,10 @@ import { Fondo, Placa } from "./Placas";
  *  5 · **La pantalla no se apaga.** `wakeLock` mientras dura la presentación:
  *      un standby de veinte minutos mientras se llena el salón termina, sin
  *      esto, con el proyector mostrando el bloqueo de sesión.
+ *
+ *  6 · **La voz y la música son un solo botón.** `M` calla las dos. Separarlas
+ *      daría un control más para equivocarse en vivo, y no hay gala donde
+ *      tenga sentido la fanfarria sin el locutor o al revés.
  */
 
 /** Cuánto se queda quieto el mouse antes de que se escondan los controles. */
@@ -83,6 +88,7 @@ export function Presentador({
   const [controles, setControles] = useState(true);
   const [indiceAbierto, setIndiceAbierto] = useState(false);
   const [confeti, setConfeti] = useState(0);
+  const [sinVoz, setSinVoz] = useState(false);
 
   const actual = guion[indice];
 
@@ -90,6 +96,10 @@ export function Presentador({
    *  tiene que ser el mismo objeto durante toda la presentación para poder
    *  cortar el redoble que arrancó tres renders atrás. */
   const sonido = useRef<MotorSonido | null>(null);
+
+  /** El locutor, por lo mismo: tiene que poder cancelar la locución que empezó
+   *  antes de que el presentador avanzara. */
+  const voz = useRef<Locutor | null>(null);
 
   /* ── arranque y cierre ─────────────────────────────────────────────────── */
 
@@ -104,9 +114,29 @@ export function Presentador({
     const motor = crearMotorSonido();
     sonido.current = motor;
     motor.desbloquear();
+
+    // El locutor le baja el volumen a la música mientras habla. La atenuación
+    // la maneja él y no cada llamada del presentador porque el que sabe cuándo
+    // empieza y termina una locución es el motor de voz: la duración de una
+    // frase depende de la voz que haya instalada, no del texto.
+    const locutor = crearLocutor((hablando) => motor.atenuar(hablando));
+    voz.current = locutor;
+    locutor.desbloquear();
+
     void pantalla.entrar();
 
+    // Las voces del sistema llegan asíncronas: preguntar en este tick daría
+    // "no hay voz" siempre. Se pregunta una vez, con la placa de standby en
+    // pantalla, que es cuando el que presenta todavía puede hacer algo al
+    // respecto.
+    const revision = window.setTimeout(() => setSinVoz(!locutor.hayVoz()), 1500);
+
     return () => {
+      window.clearTimeout(revision);
+      // Primero el locutor: al cerrarse suelta la atenuación, y el motor tiene
+      // que seguir vivo para recibirla.
+      locutor.cerrar();
+      voz.current = null;
       motor.cerrar();
       sonido.current = null;
     };
@@ -125,10 +155,20 @@ export function Presentador({
   useEffect(() => {
     if (!actual) return;
     sonido.current?.reproducir(actual.efecto);
+
+    // La rama vacía no sobra: es la que corta la voz de la viñeta anterior
+    // cuando el presentador avanza a una placa que no habla. Sin ella, el
+    // nombre del ganador seguiría sonando sobre la tabla de resultados.
+    if (actual.locucion) {
+      voz.current?.anunciar(actual.locucion.frases, actual.locucion.demora);
+    } else {
+      voz.current?.callar();
+    }
   }, [actual]);
 
   useEffect(() => {
     sonido.current?.silenciar(silencio);
+    voz.current?.silenciar(silencio);
   }, [silencio]);
 
   /* ── navegación ────────────────────────────────────────────────────────── */
@@ -408,11 +448,24 @@ export function Presentador({
       {/* Ayuda de teclado: se muestra con los controles y sólo en la primera
           viñeta, que es cuando el que presenta todavía está probando. */}
       {controles && primera && (
-        <p className="absolute right-4 top-4 z-40 hidden text-right text-xs leading-relaxed text-white/35 md:block">
-          → / espacio avanza · ← retrocede
-          <br />
-          F pantalla completa · M sonido · S índice
-        </p>
+        <div className="absolute right-4 top-4 z-40 hidden text-right text-xs leading-relaxed md:block">
+          <p className="text-white/35">
+            → / espacio avanza · ← retrocede
+            <br />
+            F pantalla completa · M sonido · S índice
+          </p>
+
+          {/* Sin voz en español la gala se proyecta igual, pero muda: nadie se
+              enteraría hasta la primera categoría. Se avisa acá, en el standby,
+              que es el único momento en que todavía se puede instalar una voz
+              en el equipo o cambiar de máquina. */}
+          {sinVoz && (
+            <p className="ml-auto mt-3 max-w-[26ch] text-white/45">
+              Este equipo no tiene voces en español instaladas: el locutor no va
+              a anunciar los premios.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

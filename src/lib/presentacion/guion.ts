@@ -151,9 +151,38 @@ export type Efecto =
   | "aplausos"
   | "cierre";
 
+/** Lo que dice el locutor al entrar a la viñeta.
+ *
+ *  Viaja en el modelo por la misma razón que `Efecto`: cuándo habla la voz es
+ *  parte del guion y no de la placa que se dibuja. La `demora` está acá y no en
+ *  `voz.ts` porque depende del efecto de **esta** viñeta —hay que dejar pasar
+ *  la fanfarria antes de decir el nombre—, y esa relación sólo se ve desde el
+ *  guion.
+ */
+export interface Locucion {
+  /** Una frase por locución. Los ganadores van de a uno y no en una sola frase
+   *  con comas: el once ideal son once nombres y así quedan separados por una
+   *  pausa en vez de leídos de corrido. */
+  frases: string[];
+  /** ms entre que aparece la placa y que arranca la voz */
+  demora: number;
+}
+
+/** El anuncio del premio entra después del golpe grave de la placa de
+ *  categoría, que arranca a los 240 ms y termina de caer cerca de los 840. */
+const DEMORA_CATEGORIA = 900;
+
+/** El nombre del ganador entra sobre el acorde sostenido de la fanfarria —que
+ *  se instala al segundo— y arriba de los aplausos, que empiezan a los 1100 ms.
+ *  Es a propósito: en una gala el nombre se dice **con** el salón aplaudiendo,
+ *  no después. El presentador le baja el volumen a la música mientras habla. */
+const DEMORA_GANADOR = 1500;
+
 interface Base {
   id: string;
   efecto: Efecto;
+  /** lo que dice la voz al entrar; sin valor, la viñeta pasa en silencio */
+  locucion?: Locucion;
   /** número de categoría dentro del guion; sin valor en las placas de marco */
   numero?: number;
   total?: number;
@@ -192,12 +221,17 @@ export function armarGuion(
   const cuerpo = elegidas.flatMap((categoria, i): Diapositiva[] => {
     const numero = i + 1;
     const marca = { numero, total };
+    const ganadores = ganadoresDe(categoria);
 
     const bloque: Diapositiva[] = [
       {
         tipo: "categoria",
         id: `${categoria.id}:categoria`,
         efecto: "categoria",
+        // El nombre del premio y no la pregunta: proyectada se lee "MEJOR
+        // ARQUERO", y eso es lo que anuncia un locutor. Leer "¿Quién fue el
+        // mejor arquero del año?" en voz alta suena a formulario.
+        locucion: { frases: [categoria.nombre], demora: DEMORA_CATEGORIA },
         rotulo: categoria.nombre,
         categoria,
         ...marca,
@@ -230,9 +264,14 @@ export function armarGuion(
       tipo: "ganador",
       id: `${categoria.id}:ganador`,
       efecto: "fanfarria",
+      // Sin ganadores la placa dice "Sin votos todavía" y la voz se calla: que
+      // el locutor anuncie que no hay nada es peor que el silencio.
+      locucion: ganadores.length
+        ? { frases: ganadores.map((g) => g.texto), demora: DEMORA_GANADOR }
+        : undefined,
       rotulo: `${categoria.nombre} · ganador`,
       categoria,
-      ganadores: ganadoresDe(categoria),
+      ganadores,
       ...marca,
     });
 
