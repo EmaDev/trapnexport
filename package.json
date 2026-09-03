@@ -26,6 +26,9 @@
     "react-dom": "19.2.4",
     "web-push": "^3.6.7"
   },
+  "resolutions": {
+    "jose": "4.15.9"
+  },
   "overrides": {
     "jose": "4.15.9"
   },
