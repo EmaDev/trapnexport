@@ -61,6 +61,25 @@ export const PIERNA_LABEL: Record<PiernaHabil, string> = {
  *  y porque separa el dato deportivo del dato de cuenta: nombre, handle y
  *  avatar son de la red social; esto es del jugador.
  */
+/** Una habilidad puntuada, tal como la carga el propio jugador en `/perfil`.
+ *
+ *  Misma forma y misma escala que `PlayerSkill` de `lib/historia/types.ts`
+ *  —`label` + `value` de 0 a 100— y es a propósito: las dos alimentan la misma
+ *  barra en `PlayerSpotlight` y el mismo promedio en `construirCarta`, así que
+ *  tienen que ser intercambiables sin traducir nada.
+ *
+ *  Está declarada acá y no importada de la historia para no cruzar los dos
+ *  módulos: `lib/historia/types.ts` ya importa `PlayerFicha` de este archivo, y
+ *  la vuelta importaría un ciclo entre dos archivos de tipos por una interfaz
+ *  de dos campos. TypeScript es estructural: donde se espera un `PlayerSkill`
+ *  esto entra igual.
+ */
+export interface FichaSkill {
+  label: string;
+  /** 0 a 100 — es la escala de la barra, no una nota sobre 10 */
+  value: number;
+}
+
 export interface PlayerFicha {
   /** años; el editor la acota a 10–80 antes de guardar */
   edad?: number;
@@ -74,6 +93,12 @@ export interface PlayerFicha {
   dorsal?: number;
   /** de dónde es; texto libre y corto, va debajo del nombre */
   ciudad?: string;
+  /** lo que se cree bueno haciendo, puntuado por él mismo.
+   *
+   *  Ausente —y no `[]`— cuando nunca cargó ninguna: la diferencia importa
+   *  porque es lo que decide si `/historia` muestra estas skills o cae a las
+   *  que tenga la ficha institucional del club. */
+  skills?: FichaSkill[];
 }
 
 /** Una foto o un video del carrete personal de la cuenta.

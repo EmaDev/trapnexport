@@ -1,6 +1,8 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { CLUB_UID, COL } from "@/lib/firebase/collections";
 import type { UserDoc } from "@/lib/firebase/schema";
+import { getDirectorio } from "@/lib/social/directorio";
+import type { PlayerFicha } from "@/lib/social/types";
 import { shortDate } from "@/lib/time";
 
 /** Lecturas del panel sobre las cuentas **reales**, las de Firestore.
@@ -118,6 +120,61 @@ export async function getSolicitudes(): Promise<SolicitudRow[]> {
     // tiempo lleva bloqueando a un jugador.
     .sort((a, b) => a.orden - b.orden)
     .map(({ orden: _orden, ...row }) => row);
+}
+
+/* ── fichas deportivas ───────────────────────────────────────────────────── */
+
+/** Una cuenta vista desde la solapa "Fichas" de `/admin/historia`.
+ *
+ *  La ficha deportiva es de la persona y la carga ella en `/perfil`, pero es
+ *  opcional y la mitad del plantel no la completa: esta fila es lo que el panel
+ *  necesita para cargarla por quien no lo hizo, sin salirse de la pantalla
+ *  donde se edita el resto de lo que muestra `/historia`.
+ *
+ *  Trae `verified` y `suspended` porque son las dos razones por las que una
+ *  ficha cargada puede no aparecer en la pantalla pública: `getPlayers()` sólo
+ *  cruza cuentas verificadas y no suspendidas. El panel lo avisa antes de que
+ *  alguien cargue veinte campos y no vea ningún cambio.
+ */
+export interface FichaCuentaRow {
+  uid: string;
+  name: string;
+  handle: string;
+  avatar: string;
+  /** slug del jugador vinculado; sin esto la ficha no sale en `/historia` */
+  playerId?: string;
+  verified: boolean;
+  suspended: boolean;
+  ficha: PlayerFicha;
+}
+
+/** Las cuentas con su ficha deportiva, para la solapa "Fichas" del panel.
+ *
+ *  Las del plantel primero y después el resto: la ficha de un hincha se puede
+ *  cargar igual —nada lo impide— pero no se muestra en ningún lado, así que las
+ *  filas que importan tienen que estar arriba. Dentro de cada grupo, por
+ *  nombre: es una lista para buscar a alguien, no una cola de trabajo.
+ */
+export async function getFichasDeCuentas(): Promise<FichaCuentaRow[]> {
+  const dir = await getDirectorio();
+
+  return dir
+    .todas()
+    .filter((c) => c.id !== CLUB_UID)
+    .map((c) => ({
+      uid: c.id,
+      name: c.name,
+      handle: c.handle,
+      avatar: c.avatar,
+      playerId: c.playerId,
+      verified: c.verified,
+      suspended: c.suspended,
+      ficha: c.ficha,
+    }))
+    .sort((a, b) => {
+      const plantel = Number(Boolean(b.playerId)) - Number(Boolean(a.playerId));
+      return plantel || a.name.localeCompare(b.name, "es");
+    });
 }
 
 export interface CuentasStats {

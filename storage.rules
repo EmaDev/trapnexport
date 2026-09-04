@@ -54,6 +54,29 @@ service firebase.storage {
       allow delete: if isSelf(userId) || isAdmin();
     }
 
+    // Fotos de las conversaciones (`lib/storage/chat-image.ts`).
+    //
+    // Mismo corte que el feed: cada quien escribe en su propia carpeta y sube
+    // WebP comprimido, así que los 3 MB son margen para un caso raro.
+    //
+    // **La lectura es pública, y en un chat privado eso hay que decirlo.** No
+    // es un descuido heredado: es que la imagen la pide el `<img>` del
+    // navegador de quien mira la conversación, y una regla que exigiera ser
+    // participante necesitaría leer la conversación desde Storage, que no puede.
+    // Lo que protege a la foto es el token que Firebase mete en la
+    // `downloadURL` —imposible de adivinar—, no un permiso: quien reciba ese
+    // link la ve sin estar en el chat. Cerrarlo de verdad es servir las
+    // imágenes desde el servidor con URLs firmadas, y es otra decisión.
+    //
+    // El borrado es sólo del dueño y del panel. No hay pantalla que borre
+    // mensajes todavía; lo que sí borra es el compositor, cuando alguien saca
+    // una foto que eligió y no llegó a mandar.
+    match /trapnexport-chat/{userId}/{fileName} {
+      allow read: if true;
+      allow create, update: if isSelf(userId) && esImagen(3);
+      allow delete: if isSelf(userId) || isAdmin();
+    }
+
     // Fotos de perfil (`lib/media-upload.ts` → `uploadAvatar`).
     //
     // Se comprimen a 512 px de lado largo, que es todo lo que necesita un avatar

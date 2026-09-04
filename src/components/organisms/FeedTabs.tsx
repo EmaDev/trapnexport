@@ -225,10 +225,17 @@ export function FeedTabs({
   const { user, account } = useAuth();
   const [tab, setTab] = useState<string>("encuesta");
 
-  // Qué votó cada uno en esta sesión. Se manda el voto anterior a `votarEncuesta`
-  // para que cambiar de opción reste de la vieja; recargar lo olvida. Los conteos
-  // no se guardan acá: no se muestran.
-  const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  // Qué votó cada uno. Arranca con lo que ya sabía el servidor (`encuesta.voto`,
+  // de `trapnexport-encuesta/{id}/voto/{uid}`) y no vacío: si no, recargar la
+  // página perdía el "Votado" aunque el voto siguiera en Firestore, y volver a
+  // elegir no sumaba de más —eso lo evita el dedupe de `votarEncuesta`— pero sí
+  // volvía a pedir votar algo ya votado. Se manda el voto anterior a
+  // `votarEncuesta` para que cambiar de opción reste de la vieja.
+  const [answers, setAnswers] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(
+      encuestas.filter((e) => e.voto).map((e) => [e.id, e.voto as string[]]),
+    ),
+  );
 
   // Contador de rechazos por encuesta. `vote` lo sube cuando el servidor no toma
   // el voto (sin sesión, votación cerrada); `CategoriaFila` lo usa de `key` para

@@ -1,11 +1,13 @@
+import { getCurrentUid } from "@/lib/auth/sesion";
 import { adminDb } from "@/lib/firebase/admin";
-import { COL, CONFIG_CRONOGRAMA } from "@/lib/firebase/collections";
+import { COL, CONFIG_CRONOGRAMA, SUB_VOTO } from "@/lib/firebase/collections";
 import type {
   CronogramaConfigDoc,
   EncuestaDoc,
   EventoDoc,
   InvitacionDoc,
   NoticiaDoc,
+  VotoDoc,
 } from "@/lib/firebase/schema";
 import type { Encuesta, Evento, Invitacion, Noticia } from "@/lib/contenido/types";
 import { absoluteUrl } from "@/lib/site";
@@ -293,24 +295,55 @@ export interface EncuestaFeedVM {
   /** todavía no se puede votar: se muestra la lista de opciones en gris */
   proximamente: boolean;
   opciones: { id: string; texto: string; media?: string }[];
+  /** lo que esta persona ya votó acá, según su documento en
+   *  `trapnexport-encuesta/{id}/voto/{uid}` — `null` sin sesión o sin voto
+   *  todavía. Sin esto el "Votado" del feed vivía sólo en el estado de React:
+   *  recargar la página lo perdía y dejaba votar de nuevo, aunque el servidor
+   *  ya tuviera el voto (y lo ignorara: ver el dedupe en `votarEncuesta`). */
+  voto: string[] | null;
 }
 
 export async function getEncuestasFeed(): Promise<EncuestaFeedVM[]> {
-  // Ascendente: el feed las lista en el orden en que se anuncian en la gala,
-  // que es el de la semilla (`createdAt` escalonado por premio).
-  const snap = await adminDb().collection(COL.encuesta).orderBy("createdAt", "asc").get();
+  const [uid, snap] = await Promise.all([
+    getCurrentUid(),
+    // Ascendente: el feed las lista en el orden en que se anuncian en la gala,
+    // que es el de la semilla (`createdAt` escalonado por premio).
+    adminDb().collection(COL.encuesta).orderBy("createdAt", "asc").get(),
+  ]);
 
-  return snap.docs
+  const encuestas = snap.docs
     .map((doc) => aEncuesta(doc.id, doc.data() as EncuestaDoc))
-    .filter((e) => e.estado !== "cerrada")
-    .map((e) => ({
+    .filter((e) => e.estado !== "cerrada");
+
+  // Un `get()` por encuesta abierta y no una query sola: son pocas (una por
+  // premio) y `voto` es una subcolección por documento, no colectionGroup con
+  // un campo por el que filtrar por uid.
+  const votos = uid
+    ? await Promise.all(
+        encuestas.map((e) =>
+          e.estado === "abierta"
+            ? adminDb().collection(COL.encuesta).doc(e.id).collection(SUB_VOTO).doc(uid).get()
+            : null,
+        ),
+      )
+    : null;
+
+  return encuestas.map((e, i) => {
+    const votoSnap = votos?.[i];
+    const opciones = ((votoSnap?.data() as VotoDoc | undefined)?.opciones ?? []).filter((id) =>
+      e.opciones.some((o) => o.id === id),
+    );
+
+    return {
       id: e.id,
       pregunta: e.pregunta,
       descripcion: e.descripcion,
       multiple: e.multiple,
       proximamente: e.estado !== "abierta",
       opciones: e.opciones.map((o) => ({ id: o.id, texto: o.texto, media: o.media })),
-    }));
+      voto: opciones.length ? opciones : null,
+    };
+  });
 }
 
 /** Una noticia publicada, para la solapa "Noticias" del feed. */

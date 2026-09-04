@@ -56,11 +56,15 @@ export interface MessageVM {
   id: string;
   autorId: string;
   autor: AuthorVM | null;
+  /** en `tipo: "imagen"` es el pie, y puede ser `""` */
   texto: string;
   tipo: MensajeTipo;
   at: number;
   /** si lo escribió quien está mirando */
   propio: boolean;
+  /** sólo en `tipo: "imagen"`. Las medidas van para que la burbuja tenga alto
+   *  antes de que la foto cargue y el hilo no pegue un salto. */
+  imagen?: { src: string; width: number; height: number };
 }
 
 /** El encabezado de una conversación, sin los mensajes. */
@@ -222,6 +226,17 @@ export async function getMessages(id: string): Promise<MessageVM[]> {
       tipo: m.tipo,
       at: aMillis(m.at),
       propio: m.autorId === viewerId,
+      // `path` no viaja al cliente: sirve para borrar del bucket y eso lo hace
+      // el servidor. Mandarlo sería contarle a la pantalla algo que no usa.
+      ...(m.imagen
+        ? {
+            imagen: {
+              src: m.imagen.src,
+              width: m.imagen.width,
+              height: m.imagen.height,
+            },
+          }
+        : null),
     };
   });
 }

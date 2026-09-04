@@ -106,3 +106,47 @@ export function horaMas(
     diaSiguiente: total >= 1440,
   };
 }
+
+/** "14:32" — la hora suelta de un mensaje del chat. */
+export function clockTime(at: number | Date): string {
+  return new Intl.DateTimeFormat("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(at instanceof Date ? at : new Date(at));
+}
+
+/** "Hoy 14:32", "Ayer 09:05", "12 sept 14:32", "12 sept 2024 14:32".
+ *
+ *  El sello que separa tandas de mensajes en el hilo. Es la hora *y* el día
+ *  porque un hilo de chat se lee de una: sin el día, dos mensajes con "14:32"
+ *  separados por una semana parecen seguidos.
+ *
+ *  Depende de la zona horaria de quien mira, así que en SSR el servidor
+ *  —UTC— y el navegador pueden escribir cosas distintas. Quien lo pinta lleva
+ *  `suppressHydrationWarning`: **qué** mensajes llevan sello se decide por la
+ *  diferencia entre timestamps, que no depende de la zona, así que lo único
+ *  que puede diferir es el texto.
+ */
+export function chatStamp(at: number | Date, now: number = Date.now()): string {
+  const d = at instanceof Date ? at : new Date(at);
+  const hoy = new Date(now);
+  const ayer = new Date(now);
+  ayer.setDate(hoy.getDate() - 1);
+
+  const mismoDia = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (mismoDia(d, hoy)) return `Hoy ${clockTime(d)}`;
+  if (mismoDia(d, ayer)) return `Ayer ${clockTime(d)}`;
+
+  const fecha = new Intl.DateTimeFormat("es-AR", {
+    day: "numeric",
+    month: "short",
+    // El año sólo cuando no es este: en un chat activo sería ruido en cada sello.
+    ...(d.getFullYear() === hoy.getFullYear() ? {} : { year: "numeric" }),
+  }).format(d);
+
+  return `${fecha} ${clockTime(d)}`;
+}

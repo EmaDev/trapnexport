@@ -1,3 +1,5 @@
+import { cache } from "react";
+
 import { adminDb } from "@/lib/firebase/admin";
 import { COL, HISTORIA_CLUB } from "@/lib/firebase/collections";
 import type {
@@ -26,6 +28,7 @@ import type {
   SeasonHighlight,
   Trophy,
 } from "@/lib/historia/types";
+import { getDirectorio, type Cuenta } from "@/lib/social/directorio";
 
 /** Lecturas de la historia del club, ya mapeadas a lo que esperan las
  *  pantallas. Mitad "read" del par con `actions.ts`.
@@ -220,8 +223,38 @@ export async function getSeasonSlugs(): Promise<string[]> {
 
 /* ── jugadores ───────────────────────────────────────────────────────────── */
 
-const aPlayer = (id: string, d: PlayerDoc): Player => ({
+/** Las cuentas que reclamaron un jugador, indexadas por `playerId`.
+ *
+ *  Es el puente entre las dos mitades de una misma persona: la ficha de
+ *  trayectoria vive en `trapnexport-historia-jugador` y la edita el club; la
+ *  ficha personal —datos y skills— vive en `trapnexport-user` y la edita ella.
+ *
+ *  Se resuelve con `getDirectorio()`, que ya trae las cuentas de una sola
+ *  lectura memoizada por request: `/historia` la comparte con el header, el
+ *  feed y las notificaciones de la misma pantalla, así que el cruce no agrega
+ *  ningún viaje a Firestore.
+ *
+ *  Sólo cuentas **aprobadas**: mientras el reclamo está `pending` nadie
+ *  verificó que esa persona sea ese jugador, y publicar en la historia del club
+ *  lo que escribió quien todavía dice ser alguien es exactamente el agujero que
+ *  la cola de solicitudes existe para tapar. Las suspendidas quedan afuera por
+ *  lo mismo que quedan afuera del feed.
+ */
+const fichasDeCuentas = cache(async (): Promise<Map<string, Cuenta>> => {
+  const dir = await getDirectorio();
+  const porJugador = new Map<string, Cuenta>();
+
+  for (const c of dir.todas()) {
+    if (!c.playerId || c.suspended || !c.verified) continue;
+    porJugador.set(c.playerId, c);
+  }
+
+  return porJugador;
+});
+
+const aPlayer = (id: string, d: PlayerDoc, cuenta?: Cuenta): Player => ({
   id,
+  ...(cuenta ? { ficha: cuenta.ficha, handle: cuenta.handle } : {}),
   name: d.name,
   nickname: d.nickname,
   number: d.number,
@@ -248,22 +281,38 @@ const aPlayer = (id: string, d: PlayerDoc): Player => ({
   ...(d.quote ? { quote: d.quote } : {}),
 });
 
+/** Le pega a una ficha de la semilla la cuenta de esa persona, si la tiene.
+ *
+ *  La semilla también pasa por el cruce: un club que todavía no importó su
+ *  historia tiene igual cuentas reales, y el jugador que cargó sus skills
+ *  espera verlas en la pantalla — que la ficha de al lado sea contenido de
+ *  arranque no es asunto suyo. */
+const conCuenta = (p: Player, cuentas: Map<string, Cuenta>): Player => {
+  const c = cuentas.get(p.id);
+  return c ? { ...p, ficha: c.ficha, handle: c.handle } : p;
+};
+
 export async function getPlayers(): Promise<Player[]> {
-  const snap = await adminDb().collection(COL.historiaJugador).orderBy("orden", "asc").get();
-  if (snap.empty) return SEED.players;
-  return snap.docs.map((doc) => aPlayer(doc.id, doc.data() as PlayerDoc));
+  const [snap, cuentas] = await Promise.all([
+    adminDb().collection(COL.historiaJugador).orderBy("orden", "asc").get(),
+    fichasDeCuentas(),
+  ]);
+
+  if (snap.empty) return SEED.players.map((p) => conCuenta(p, cuentas));
+  return snap.docs.map((doc) => aPlayer(doc.id, doc.data() as PlayerDoc, cuentas.get(doc.id)));
 }
 
 export async function getPlayer(id: string): Promise<Player | null> {
   const col = adminDb().collection(COL.historiaJugador);
-  const snap = await col.doc(id).get();
+  const [snap, cuentas] = await Promise.all([col.doc(id).get(), fichasDeCuentas()]);
   const d = snap.data() as PlayerDoc | undefined;
-  if (d) return aPlayer(snap.id, d);
+  if (d) return aPlayer(snap.id, d, cuentas.get(snap.id));
 
   // Mismo criterio que `getSeason`: la semilla sólo cubre la colección vacía.
   if (!(await col.limit(1).get()).empty) return null;
 
-  return SEED.players.find((p) => p.id === id) ?? null;
+  const semilla = SEED.players.find((p) => p.id === id);
+  return semilla ? conCuenta(semilla, cuentas) : null;
 }
 
 /* ── frases, museo y video ───────────────────────────────────────────────── */

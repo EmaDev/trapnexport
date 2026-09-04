@@ -18,6 +18,12 @@
  *  Todas se editan desde `/admin/historia`.
  */
 
+/*  La ficha que edita la persona en `/perfil` vive en el módulo social —es un
+ *  dato de la cuenta, no del club— y la historia sólo la muestra. La flecha va
+ *  en una sola dirección a propósito: `lib/social/types.ts` no importa nada de
+ *  acá. */
+import type { PlayerFicha } from "@/lib/social/types";
+
 /* ── identidad ───────────────────────────────────────────────────────────── */
 
 export interface ClubIdentity {
@@ -192,6 +198,27 @@ export interface Player {
    *  dijo, e inventar una cita a nombre de una persona real que ya no está
    *  no es el tipo de "relleno" que corresponde acá. */
   quote?: Quote;
+
+  /* ── lo que cargó la persona ───────────────────────────────────────────── */
+
+  /** La ficha que el propio jugador editó en `/perfil`, si tiene cuenta.
+   *
+   *  **No sale de esta colección**: la trae `getPlayers()` cruzando el id de
+   *  esta ficha con el `playerId` de `trapnexport-user`. Es un dato de la
+   *  cuenta, no del club, y por eso vive en la cuenta — el panel lo edita
+   *  desde la solapa "Fichas", que escribe el mismo documento que escribiría la
+   *  persona.
+   *
+   *  Ausente cuando nadie reclamó a ese jugador. Presente pero vacía (`{}`)
+   *  cuando la cuenta existe y todavía no completó nada: son dos casos
+   *  distintos y el panel los muestra distinto.
+   *
+   *  Gana sobre los campos de arriba en `PlayerSpotlight`, campo por campo: lo
+   *  que la persona dice de sí misma está más al día que la ficha
+   *  institucional, y lo que no cargó cae a la del club. */
+  ficha?: PlayerFicha;
+  /** handle de esa cuenta, para poder linkear a `/u/:handle` desde la ficha */
+  handle?: string;
 }
 
 /* ── temporadas ──────────────────────────────────────────────────────────── */

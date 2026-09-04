@@ -137,8 +137,22 @@ export interface UserDoc {
   claim?: UserClaimDoc;
 
   /* ── ficha deportiva ───────────────────────────────────────────────────── */
-  /** sólo en cuentas `player`. Objeto anidado y no campos sueltos: se edita y
-   *  se valida como una unidad, igual que hoy en `updateFicha`. */
+  /** Datos personales y skills, cargados por la propia persona en `/perfil`.
+   *
+   *  Objeto anidado y no campos sueltos: se edita y se valida como una unidad
+   *  —`updateFicha` la reemplaza entera— y así un campo que no viene es un
+   *  campo borrado, sin `deleteField` por cada uno.
+   *
+   *  En la práctica sólo la tienen las cuentas `player`, pero nada lo impide:
+   *  no hay una regla que la ate al rol, y la ficha de un hincha simplemente no
+   *  se muestra en ningún lado.
+   *
+   *  **La lee `/historia`**: `historia/queries.getPlayers()` cruza las cuentas
+   *  verificadas con las fichas de trayectoria por `playerId` y esto gana campo
+   *  por campo sobre lo que anotó el club. Por eso hay un segundo camino de
+   *  escritura —`guardarFichaDeCuenta`, desde `/admin/historia` → Fichas— para
+   *  la mitad del plantel que nunca la completa; los dos comparten el saneador
+   *  de `lib/social/ficha.ts` y escriben esta misma clave. */
   ficha?: PlayerFicha;
 
   /* ── contadores y metadata ─────────────────────────────────────────────── */
@@ -495,15 +509,44 @@ export interface ConversacionDoc {
 
 /** `"sistema"` es "Fulano agregó a Mengano": lo escribe el servidor, no tiene
  *  autor que mostrar y se dibuja centrado en vez de en una burbuja. Sin un tipo,
- *  esos avisos habría que fabricarlos en la UI a partir de nada. */
-export type MensajeTipo = "texto" | "sistema";
+ *  esos avisos habría que fabricarlos en la UI a partir de nada.
+ *
+ *  `"imagen"` es una foto, con o sin pie. Es un tipo y no un `MensajeDoc` con
+ *  `imagen` opcional porque la burbuja se dibuja distinta —la foto ocupa la
+ *  burbuja entera y el texto, si lo hay, va debajo— y porque la bandeja tiene
+ *  que poder decir "📷 Foto" sin mirar si hay un campo puesto. */
+export type MensajeTipo = "texto" | "sistema" | "imagen";
+
+/** La foto de un mensaje `tipo: "imagen"`.
+ *
+ *  **`width` y `height` son del archivo ya comprimido, y no son opcionales.**
+ *  Sin ellos la burbuja no tiene alto hasta que la imagen carga, y el hilo —que
+ *  está pegado al fondo— pega un salto cada vez que llega una foto: lo que se
+ *  estaba leyendo se va de pantalla. Con las medidas, el lugar queda reservado
+ *  desde el primer pintado.
+ *
+ *  `path` es la ruta en el bucket. Hoy no la usa nadie —no se pueden borrar
+ *  mensajes—, pero es lo único que permite encontrar el archivo el día que se
+ *  puedan: el nombre es al azar y la `downloadURL` lleva un token adentro.
+ */
+export interface MensajeImagenDoc {
+  /** `downloadURL` pública: es lo que renderiza el `<img>` */
+  src: string;
+  /** ruta dentro del bucket (`trapnexport-chat/{uid}/{archivo}`) */
+  path: string;
+  width: number;
+  height: number;
+}
 
 export interface MensajeDoc {
   /** uid de quien escribió. En los de sistema es el uid de quien hizo la acción. */
   autorId: string;
+  /** en `tipo: "imagen"` es el pie, y puede ser `""` */
   texto: string;
   tipo: MensajeTipo;
   at: FsTimestamp;
+  /** sólo en `tipo: "imagen"` */
+  imagen?: MensajeImagenDoc;
 }
 
 /* ── trapnexport-difusion/{id} ───────────────────────────────────────────── */

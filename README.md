@@ -123,7 +123,7 @@ src/lib/social/actions.ts     Escrituras como Server Actions, con el uid sacado 
 src/lib/social/notify.ts      Alta de avisos de campanita → Firestore (trapnexport-notification).
 
 src/lib/chat/queries.ts       Bandeja, encabezado y mensajes; la bandeja del club para el panel.
-src/lib/chat/actions.ts       Enviar, crear grupos, marcar leído y la difusión del panel.
+src/lib/chat/actions.ts       Enviar (texto y foto), crear grupos, marcar leído y la difusión del panel.
 src/lib/chat/vivo.ts          Client · las escuchas onSnapshot. La ÚNICA lectura directa del navegador a Firestore.
 
 src/lib/auth/sesion.ts        Server · la cookie __session: emitir, cerrar, verificar, getCurrentUid/requireUid.
@@ -191,6 +191,26 @@ La única excepción a "las pantallas no tocan Firestore" es la conversación, q
 se engancha con `onSnapshot` desde el navegador (`lib/chat/vivo.ts`): sin eso los
 mensajes no llegarían solos. Es sólo lectura, y por eso es la única parte del
 dominio con reglas de lectura para el cliente.
+
+Un mensaje puede ser texto o **foto** (`MensajeDoc.tipo`). El archivo lo sube el
+navegador directo a `trapnexport-chat/{uid}/` con el mismo motor que las fotos
+del feed (`lib/storage/chat-image.ts`, lado largo 1080); por la Server Action
+`sendImage` viaja sólo la `downloadURL`, la ruta del bucket y **las medidas** —
+que están para que la burbuja tenga alto antes de que la imagen cargue y el hilo
+no pegue un salto. `sendImage` no le cree al cliente: valida que la ruta empiece
+con la carpeta propia y que el host sea de Firebase, o cualquiera podría meter
+por POST una imagen de otro sitio dentro de una conversación.
+
+**Ojo con la privacidad de esas fotos**: como todo el bucket, la lectura es
+pública. Lo que las protege es el token imposible de adivinar que Firebase mete
+en la `downloadURL`, no un permiso — quien reciba el link la ve sin estar en la
+conversación. Cerrarlo de verdad significa servirlas desde el servidor con URLs
+firmadas, y eso es otra decisión, no un ajuste.
+
+Las fotos de las conversaciones van a `trapnexport-chat/` y no a
+`trapnexport-post/` aunque compartan el motor: el path es lo que
+`storage.rules` usa para acotar quién escribe dónde, y mezclarlas dejaría las
+fotos de un chat privado bajo la misma regla que las de un feed público.
 
 Los avatares generados siguen siendo **data-URI SVG** de `src/lib/media.ts`,
 deterministas por handle: son el valor por defecto de una cuenta sin foto. Las

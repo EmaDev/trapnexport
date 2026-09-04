@@ -6,9 +6,14 @@ import { BottomSheet, Button, usePrefersReducedMotion, useSnackbar } from "lib-k
 import { DownloadIcon, InstagramIcon, WhatsAppIcon } from "@/components/atoms/icons";
 import { PlayerCard } from "@/components/organisms/PlayerCard";
 import { ESTILOS, PALETAS, type CartaVM, type EstiloCarta } from "@/lib/carta/carta";
-import { copiarImagen, descargarImagen, textoCarta } from "@/lib/carta/compartir";
+import { textoCarta } from "@/lib/carta/compartir";
 import { renderCarta } from "@/lib/carta/render";
-import { abrirWhatsApp, compartirEnInstagram } from "@/lib/invitacion/compartir";
+import {
+  abrirWhatsApp,
+  compartirEnInstagram,
+  copiarImagen,
+  descargarImagen,
+} from "@/lib/invitacion/compartir";
 import { absoluteUrl } from "@/lib/site";
 
 /** La hoja de "Ver carta jugador": la carta, los tres estilos y compartir.

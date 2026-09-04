@@ -40,6 +40,19 @@ export interface ImagenSubida {
   size: number;
 }
 
+/** Lo que devuelve `subirImagen`: lo de arriba más las medidas del archivo ya
+ *  reescalado.
+ *
+ *  Va en un tipo aparte y no como campos opcionales de `ImagenSubida` porque
+ *  `subirArchivo` no puede darlas —sube sin decodificar, que es todo el punto de
+ *  esa función— y un `width?: number` obligaría a cada consumidor a contemplar
+ *  un caso que en su camino no existe. Quien las necesita de verdad es el chat:
+ *  ver `MensajeImagenDoc`. */
+export interface ImagenComprimidaSubida extends ImagenSubida {
+  width: number;
+  height: number;
+}
+
 const loadImage = (file: File): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -68,7 +81,14 @@ const toBlob = (canvas: HTMLCanvasElement, type: string, quality: number): Promi
 export async function comprimirImagen(
   file: File,
   maxEdge: number,
-): Promise<{ blob: Blob; ext: "webp" | "jpg"; contentType: string }> {
+): Promise<{
+  blob: Blob;
+  ext: "webp" | "jpg";
+  contentType: string;
+  /** medidas del resultado, no del original */
+  width: number;
+  height: number;
+}> {
   const img = await loadImage(file);
 
   const lado = Math.max(img.naturalWidth, img.naturalHeight) || 1;
@@ -89,10 +109,10 @@ export async function comprimirImagen(
   // `toBlob` con un tipo no soportado cae silenciosamente a PNG: si el blob no
   // salió como WebP, no sirve y se va al JPEG.
   if (webp && webp.type === "image/webp") {
-    return { blob: webp, ext: "webp", contentType: "image/webp" };
+    return { blob: webp, ext: "webp", contentType: "image/webp", width: w, height: h };
   }
   const jpeg = await toBlob(canvas, "image/jpeg", JPEG_QUALITY);
-  if (jpeg) return { blob: jpeg, ext: "jpg", contentType: "image/jpeg" };
+  if (jpeg) return { blob: jpeg, ext: "jpg", contentType: "image/jpeg", width: w, height: h };
 
   throw new Error("No se pudo comprimir la imagen.");
 }
@@ -114,7 +134,7 @@ export async function subirImagen(
     maxEdge: number;
     porUsuario?: boolean;
   },
-): Promise<ImagenSubida> {
+): Promise<ImagenComprimidaSubida> {
   if (!file.type.startsWith("image/")) {
     throw new Error("Ese archivo no es una imagen.");
   }
@@ -122,7 +142,7 @@ export async function subirImagen(
     throw new Error("La imagen es demasiado pesada. Probá con una más liviana.");
   }
 
-  const { blob, ext, contentType } = await comprimirImagen(file, maxEdge);
+  const { blob, ext, contentType, width, height } = await comprimirImagen(file, maxEdge);
 
   const uid = auth.currentUser?.uid ?? "anon";
   const path = [carpeta, porUsuario ? uid : null, nombreAzar(ext)]
@@ -137,7 +157,7 @@ export async function subirImagen(
     cacheControl: "public, max-age=31536000, immutable",
   });
 
-  return { src: await getDownloadURL(objeto), path, size: blob.size };
+  return { src: await getDownloadURL(objeto), path, size: blob.size, width, height };
 }
 
 /** Sube un archivo **tal cual**, sin comprimirlo ni mirarle el tipo.

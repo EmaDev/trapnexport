@@ -8,7 +8,11 @@ import { getCurrentUid } from "@/lib/auth/sesion";
 import { idDirecta } from "@/lib/chat/queries";
 import { adminDb } from "@/lib/firebase/admin";
 import { CLUB_UID, COL, SUB_MENSAJE } from "@/lib/firebase/collections";
-import type { ConversacionDoc, DifusionAlcance } from "@/lib/firebase/schema";
+import type {
+  ConversacionDoc,
+  DifusionAlcance,
+  MensajeImagenDoc,
+} from "@/lib/firebase/schema";
 import { getDirectorio } from "@/lib/social/directorio";
 import { notifyUser } from "@/lib/social/notify";
 
@@ -33,6 +37,48 @@ const recorte = (s: string, max = 90) => {
   if (linea.length <= max) return linea;
   return linea.slice(0, linea.lastIndexOf(" ", max) > 0 ? linea.lastIndexOf(" ", max) : max) + "…";
 };
+
+/** Cómo se resume un mensaje para la bandeja y para la campanita.
+ *
+ *  Una foto sin pie no tiene texto que mostrar, y dejar la línea vacía hace que
+ *  la bandeja se vea rota: "Vos:" y nada más. El emoji delante es lo que hacen
+ *  todas las apps de mensajes por exactamente este motivo. */
+const resumen = (texto: string, hayImagen: boolean, max = 90) => {
+  if (!hayImagen) return recorte(texto, max);
+  const pie = recorte(texto, Math.max(10, max - 2));
+  return pie ? `📷 ${pie}` : "📷 Foto";
+};
+
+/** ¿La foto que dice haber subido el cliente es suya y está en el bucket?
+ *
+ *  La action recibe una URL y una ruta, **no un archivo**: la subida la hizo el
+ *  navegador directo contra Storage. Sin este corte, cualquiera puede mandar por
+ *  POST un `src` apuntando a donde se le ocurra y dejar la imagen de otro sitio
+ *  —o de la carpeta de otra persona— metida dentro de una conversación, con el
+ *  nombre y el avatar de quien la mandó al lado.
+ *
+ *  Son dos condiciones y hacen falta las dos. La ruta tiene que empezar con la
+ *  carpeta propia, que es exactamente lo que `storage.rules` deja escribir, así
+ *  que un `path` válido implica que el archivo lo subió esta cuenta. Y el host
+ *  tiene que ser de Firebase, o el `path` correcto podría venir acompañado de un
+ *  `src` que apunta a cualquier otro lado.
+ */
+function fotoValida(imagen: MensajeImagenDoc, uid: string): boolean {
+  if (!imagen?.path?.startsWith(`trapnexport-chat/${uid}/`)) return false;
+  if (!Number.isFinite(imagen.width) || !Number.isFinite(imagen.height)) return false;
+  if (imagen.width <= 0 || imagen.height <= 0) return false;
+
+  try {
+    const url = new URL(imagen.src);
+    if (url.protocol !== "https:") return false;
+    return (
+      url.hostname.endsWith(".googleapis.com") || url.hostname.endsWith(".firebasestorage.app")
+    );
+  } catch {
+    // `src` no era ni siquiera una URL.
+    return false;
+  }
+}
 
 const revalidarChat = (id?: string) => {
   revalidatePath("/chat");
@@ -216,6 +262,8 @@ async function escribir(
   comoUid: string,
   texto: string,
   avisar: boolean,
+  /** si viene, el mensaje es una foto y `texto` pasa a ser su pie */
+  imagen?: MensajeImagenDoc,
 ): Promise<void> {
   const db2 = adminDb();
   const ref = db2.collection(COL.conversacion).doc(conversationId);
@@ -229,11 +277,13 @@ async function escribir(
   batch.set(ref.collection(SUB_MENSAJE).doc(), {
     autorId: comoUid,
     texto,
-    tipo: "texto",
+    tipo: imagen ? "imagen" : "texto",
     at: ahora,
+    // Firestore rechaza `undefined`: el campo se pone o no se pone.
+    ...(imagen ? { imagen } : null),
   });
   batch.update(ref, {
-    ultimoMensaje: { texto: recorte(texto, 140), autorId: comoUid, at: ahora },
+    ultimoMensaje: { texto: resumen(texto, !!imagen, 140), autorId: comoUid, at: ahora },
     updatedAt: ahora,
     // Quien escribe leyó todo lo suyo por definición: sin esto, mandar un
     // mensaje dejaría la conversación marcada como no leída para uno mismo.
@@ -257,8 +307,10 @@ async function escribir(
           actorId: comoUid,
           text: esGrupo
             ? `${nombre} escribió en ${c.nombre || "un grupo"}`
-            : `${nombre} te envió un mensaje`,
-          description: recorte(texto),
+            : imagen
+              ? `${nombre} te envió una foto`
+              : `${nombre} te envió un mensaje`,
+          description: resumen(texto, !!imagen),
           href: `/chat/${conversationId}`,
         }),
       ),
@@ -273,6 +325,38 @@ export async function sendMessage(conversationId: string, text: string): Promise
   if (!clean) return;
 
   await escribir(conversationId, uid, clean, true);
+
+  revalidarChat(conversationId);
+  revalidatePath("/notificaciones");
+}
+
+/** Manda una foto, con pie opcional.
+ *
+ *  La subida ya pasó: el navegador comprimió el archivo y lo puso en el bucket
+ *  antes de llamar acá (`lib/storage/chat-image.ts`), así que lo que viaja por
+ *  la action es la URL, la ruta y las medidas — nunca los bytes. Es el mismo
+ *  reparto que usa el compositor del feed, y por el mismo motivo: un Server
+ *  Action no es un buen lugar para mover megas de imagen.
+ *
+ *  Lo que sí es responsabilidad de acá es no creerle al cliente: ver `fotoValida`.
+ */
+export async function sendImage(
+  conversationId: string,
+  imagen: MensajeImagenDoc,
+  pie: string,
+): Promise<void> {
+  const uid = await getCurrentUid();
+  if (!uid) return;
+  if (!fotoValida(imagen, uid)) return;
+
+  await escribir(conversationId, uid, (pie ?? "").trim().slice(0, MAX_TEXTO), true, {
+    src: imagen.src,
+    path: imagen.path,
+    // Se redondean acá y no en el cliente: son las que van a fijar el alto de la
+    // burbuja, y un decimal que viene de un canvas no aporta nada.
+    width: Math.round(imagen.width),
+    height: Math.round(imagen.height),
+  });
 
   revalidarChat(conversationId);
   revalidatePath("/notificaciones");

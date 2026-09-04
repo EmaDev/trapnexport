@@ -56,7 +56,10 @@ export default async function PerfilPage() {
     handle: profile.handle,
     avatar: profile.avatar,
     ficha: profile.ficha,
-    skills: player?.skills,
+    // Las propias primero, igual que en `/historia`: si alguien se puntuó, el
+    // general de su carta sale de lo que él dice y no de lo que anotó el club.
+    // Sin ninguna de las dos, `construirCarta` estima y lo rotula como tal.
+    skills: profile.ficha.skills?.length ? profile.ficha.skills : player?.skills,
     dorsalHistoria: player?.number,
     club: club.name,
     crest: club.crest,

@@ -9,14 +9,9 @@ import { adminDb, borrarDelBucket } from "@/lib/firebase/admin";
 import { COL, SUB } from "@/lib/firebase/collections";
 import type { CommentDoc, GalleryDoc, PostDoc, UserDoc } from "@/lib/firebase/schema";
 import { getDirectorio } from "@/lib/social/directorio";
+import { saneaFicha, type FichaInput } from "@/lib/social/ficha";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
-import type {
-  GalleryItem,
-  PiernaHabil,
-  PlayerFicha,
-  PostMediaItem,
-  Posicion,
-} from "@/lib/social/types";
+import type { GalleryItem, PostMediaItem } from "@/lib/social/types";
 
 /** Escrituras del dominio, como Server Actions.
  *
@@ -196,37 +191,52 @@ export async function registerShare(postId: string): Promise<void> {
 
 /** Cambia la foto de perfil.
  *
- *  `src` es un data-URI (subida propia, ya reescalada) o uno de los avatares
- *  generados por `avatarUrl`. El dia que haya Storage (Fase 4) aca llega la URL
- *  del bucket y este cuerpo no cambia — salvo por `avatarPath`, que hace falta
- *  para poder borrar el archivo anterior.
+ *  `src` es la `downloadURL` de Firebase Storage (subida propia, ya reescalada
+ *  a 512px por `lib/media-upload.ts`) o uno de los avatares generados por
+ *  `avatarUrl`, que son data-URIs de un SVG chico. `path` sólo viene con el
+ *  primer caso: es la ruta en el bucket, y hace falta para poder borrar el
+ *  archivo anterior.
  *
  *  Escribe en `trapnexport-user/{uid}` con el Admin SDK. Las reglas dejarian que
  *  lo hiciera el navegador (`avatar` esta en `editableByOwner`), pero el uid de
  *  la cookie es una fuente mas confiable que un campo del formulario, y asi la
  *  pantalla no tiene que saber de Firestore.
  *
+ *  **Devuelve el resultado en vez de salir en silencio.** Es la excepción a la
+ *  regla del archivo, y por una razón concreta: acá no hay ninguna otra señal.
+ *  Un like que no se guarda se nota porque el corazón vuelve; una foto de perfil
+ *  que no se guarda se ve puesta hasta que alguien recarga la pantalla, y el
+ *  `catch` vacío que había antes se tragaba justo el caso que hay que contar
+ *  —la cuenta sin documento, la sesión vencida—. `AvatarPicker` muestra el
+ *  mensaje.
+ *
  *  Revalida `/u/[handle]` ademas del feed: el avatar viejo quedaria cacheado en
  *  el perfil publico de la misma persona.
  */
-export async function updateAvatar(src: string, path?: string): Promise<void> {
+export async function updateAvatar(
+  src: string,
+  path?: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const uid = await getCurrentUid();
-  if (!uid || !src) return;
+  if (!uid) return { ok: false, error: "Tu sesión venció. Volvé a entrar y probá de nuevo." };
+  if (!src) return { ok: false, error: "No se pudo leer la foto elegida." };
 
   const ref = adminDb().collection(COL.user).doc(uid);
   const snap = await ref.get();
   const anterior = (snap.data() as UserDoc | undefined)?.avatarPath;
 
-  await ref
-    .update({
+  try {
+    await ref.update({
       avatar: src,
       // `deleteField()` y no `undefined`: cambiar de una foto subida a un avatar
       // generado tiene que **borrar** la ruta vieja, o el próximo cambio
       // intentaría borrar un archivo que ya no le corresponde a este usuario.
       avatarPath: path ?? FieldValue.delete(),
       updatedAt: FieldValue.serverTimestamp(),
-    })
-    .catch(() => {});
+    });
+  } catch {
+    return { ok: false, error: "No se pudo guardar la foto. Probá de nuevo." };
+  }
 
   /*  La foto anterior se borra del bucket. Sin esto cada cambio de avatar deja
    *  un archivo que nadie referencia y que no se puede encontrar después: el
@@ -240,71 +250,34 @@ export async function updateAvatar(src: string, path?: string): Promise<void> {
   revalidatePublic();
   if (handle) revalidatePath(`/u/${handle}`);
   revalidatePath("/admin/usuarios");
+
+  return { ok: true };
 }
 
-/** Reemplaza la ficha deportiva entera.
+/** Reemplaza la ficha deportiva entera: datos personales y skills.
  *
  *  Entera y no campo por campo: el panel es un formulario con Guardar, no
  *  autoguardado por input. Un campo vacio se borra (queda `undefined`), que es
  *  justo lo que espera quien limpia el input y guarda.
  *
- *  Los rangos se validan aca y no solo en el `<input type=number>`: el input
- *  frena a un dedo distraido, esto frena a cualquiera que llame la action.
+ *  Lo que se guarde acá es lo que `/historia` muestra en la ficha del jugador:
+ *  las skills y los datos personales de esa pantalla salen de la cuenta
+ *  vinculada antes que de la ficha institucional del club. Por eso la misma
+ *  ficha la puede escribir el panel (`guardarFichaDeCuenta`) cuando la persona
+ *  no la completó, y por eso las dos comparten `saneaFicha`.
  */
-export async function updateFicha(input: {
-  edad?: number | null;
-  peso?: number | null;
-  altura?: number | null;
-  dorsal?: number | null;
-  piernaHabil?: string | null;
-  posicion?: string | null;
-  ciudad?: string | null;
-  bio?: string | null;
-}): Promise<void> {
+export async function updateFicha(
+  input: FichaInput & { bio?: string | null },
+): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
 
-  /** Numero dentro de rango, o `undefined` (que borra el campo). Rechaza NaN,
-   *  negativos y decimales donde no corresponde. */
-  const num = (v: number | null | undefined, min: number, max: number, dec = 0) => {
-    if (v === null || v === undefined || Number.isNaN(v)) return undefined;
-    if (v < min || v > max) return undefined;
-    return dec === 0 ? Math.round(v) : Math.round(v * 10 ** dec) / 10 ** dec;
-  };
-
-  const enumOf = <T extends string>(v: string | null | undefined, valid: readonly T[]) =>
-    v && (valid as readonly string[]).includes(v) ? (v as T) : undefined;
-
-  const POSICIONES = [
-    "arquero",
-    "defensor",
-    "mediocampista",
-    "delantero",
-    "polifuncional",
-  ] as const satisfies readonly Posicion[];
-  const PIERNAS = ["derecha", "izquierda", "ambidiestro"] as const satisfies readonly PiernaHabil[];
-
-  const ficha: PlayerFicha = {
-    edad: num(input.edad, 10, 80),
-    peso: num(input.peso, 30, 200, 1),
-    altura: num(input.altura, 120, 230),
-    dorsal: num(input.dorsal, 1, 99),
-    piernaHabil: enumOf(input.piernaHabil, PIERNAS),
-    posicion: enumOf(input.posicion, POSICIONES),
-    ciudad: input.ciudad?.trim().slice(0, 40) || undefined,
-  };
-
-  /*  Firestore rechaza `undefined`, y acá `undefined` significa "borrá este
-   *  campo" —es lo que espera quien limpia el input y guarda—. `deleteField()`
-   *  es cómo se dice eso. Ojo: `ficha` se reemplaza entera, así que un campo
-   *  que no viene se va solo; el `deleteField` es para `bio`, que es de nivel
-   *  superior y no se reescribe entera. */
-  const limpia = Object.fromEntries(
-    Object.entries(ficha).filter(([, v]) => v !== undefined),
-  ) as PlayerFicha;
-
+  /*  El saneo vive en `lib/social/ficha.ts` y no acá porque el panel de admin
+   *  escribe esta misma ficha por quien no la completó
+   *  (`guardarFichaDeCuenta`): dos validadores sobre la misma clave se
+   *  desincronizan en cuanto se agrega un campo. */
   const cambios: Record<string, unknown> = {
-    ficha: limpia,
+    ficha: saneaFicha(input),
     updatedAt: FieldValue.serverTimestamp(),
   };
 
@@ -321,6 +294,10 @@ export async function updateFicha(input: {
 
   revalidatePublic();
   if (handle) revalidatePath(`/u/${handle}`);
+  // La historia del club muestra esta ficha en la trayectoria de quien la
+  // cargó: sin esto, cambiar el puesto no se ve en `/historia` hasta el
+  // próximo deploy.
+  revalidatePath("/historia");
 }
 
 /** Suma una foto o un video al carrete personal.

@@ -65,6 +65,37 @@ const NAV: BottomNavItem[] = [
  *  se leería como una pantalla raíz que ya no es. */
 const PUSHED = [/^\/chat(?:\/|$)/];
 
+/** La conversación abierta: la única pantalla que no scrollea con la ventana. */
+const CONVERSACION = /^\/chat\/[^/]+$/;
+
+/** El alto exacto que le queda al contenido dentro del `<body>`.
+ *
+ *  Es lo que arregla el compositor del chat, que aparecía **abajo del último
+ *  mensaje** en vez de pegado al borde inferior. El motivo era esta cadena:
+ *  `SafeArea` sólo declara un `min-height`, `<main>` es un bloque, y un
+ *  `flex-1` adentro de un bloque no significa nada. Sin un alto definido en
+ *  ningún eslabón, la columna de la conversación crecía con los mensajes y su
+ *  última fila —el compositor— quedaba donde terminaba el hilo.
+ *
+ *  Las tres restas:
+ *
+ *    - `--sa-top` / `--sa-bottom`: el `<body>` de la librería ya aplica las
+ *      safe areas como padding, así que el alto disponible es el viewport menos
+ *      esos dos. Sin restarlas, la columna sobresale justo lo que mide el notch
+ *      y el documento vuelve a scrollear.
+ *    - `--kb-inset`: el teclado virtual **no** achica `100dvh` en iOS ni en
+ *      Chrome Android —tapa el viewport, no lo redimensiona—, así que sin esto
+ *      el compositor queda debajo del teclado en cuanto se lo enfoca. La var la
+ *      publica `useKeyboardInset`, que el propio `SafeArea` ya monta.
+ *
+ *  Se aplica sólo a esta ruta a propósito: el resto de las pantallas scrollea
+ *  con la ventana, que es lo correcto para una lista, y clavarles el alto les
+ *  rompería el header colapsable (`useHeaderCollapse` mira el scroll de la
+ *  ventana).
+ */
+const ALTO_UTIL =
+  "calc(var(--app-height, 100dvh) - var(--sa-top, 0px) - var(--sa-bottom, 0px) - var(--kb-inset, 0px))";
+
 const toAppNotification = (n: NotificationVM): AppNotification => ({
   id: n.id,
   title: n.title,
@@ -133,6 +164,7 @@ export function AppShell({
   }, [pathname]);
 
   const showNav = !PUSHED.some((re) => re.test(pathname));
+  const conversacion = CONVERSACION.test(pathname);
 
   const markRead = (id: string) => {
     setItems((l) => l.map((n) => (n.id === id ? { ...n, read: true } : n)));
@@ -170,7 +202,11 @@ export function AppShell({
         {/* El instalador (z-120) y el aviso de actualización (z-125) quedan por
             ENCIMA del drawer (z-50), que no expone forma de subirle el z-index:
             la salida es no renderizarlos mientras está abierto. */}
-        {!notifOpen && (
+        {/* Tampoco en la conversación: los dos son barras fijas abajo y ahí
+            abajo está el compositor. Un aviso de instalación tapando el campo
+            donde se está por escribir es peor que un aviso que no aparece —y la
+            bandeja, que es la pantalla de al lado, lo muestra igual. */}
+        {!notifOpen && !conversacion && (
           <>
             <PwaInstallPrompt
               appName={APP_NAME}
@@ -182,13 +218,37 @@ export function AppShell({
         )}
 
         {/* edges sin "top": lo aplica AppHeaderCardSlot. Sin "bottom": lo
-            reserva BottomNav midiendo su alto real. */}
+            reserva BottomNav midiendo su alto real.
+
+            En la conversación el `min-height` de `fillViewport` se cambia por
+            un alto exacto y `overflow-hidden`: ahí el que scrollea es el hilo,
+            no la ventana. Ver `ALTO_UTIL`. */}
         <SafeArea
           edges={["left", "right"]}
-          fillViewport
+          fillViewport={!conversacion}
           className="flex flex-col bg-surface text-foreground"
+          style={
+            conversacion
+              ? {
+                  height: ALTO_UTIL,
+                  overflow: "hidden",
+                  // El teclado entra y sale con una animación; el alto que
+                  // cambia de golpe delata que son dos cajas distintas.
+                  transition: "height 0.22s cubic-bezier(0.16,1,0.3,1)",
+                }
+              : undefined
+          }
         >
-          <main className="min-w-0 flex-1 md:pb-8">{children}</main>
+          {/* `flex flex-col` sólo acá: es lo que hace que el `flex-1` de la
+              conversación tenga contra qué medirse. En las demás pantallas
+              `main` sigue siendo un bloque y su contenido fluye como siempre. */}
+          <main
+            className={
+              conversacion ? "flex min-h-0 min-w-0 flex-1 flex-col" : "min-w-0 flex-1 md:pb-8"
+            }
+          >
+            {children}
+          </main>
         </SafeArea>
 
         {showNav && <BottomNav items={navItems} />}

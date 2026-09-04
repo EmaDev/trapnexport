@@ -2,6 +2,7 @@
 
 import {
   collection,
+  doc,
   limitToLast,
   onSnapshot,
   orderBy,
@@ -60,8 +61,9 @@ export function escucharMensajes(
           const m = d.data() as {
             autorId: string;
             texto: string;
-            tipo: "texto" | "sistema";
+            tipo: "texto" | "sistema" | "imagen";
             at: Timestamp | null;
+            imagen?: { src: string; width: number; height: number };
           };
           return {
             id: d.id,
@@ -78,6 +80,16 @@ export function escucharMensajes(
             tipo: m.tipo,
             at: aMillis(m.at),
             propio: m.autorId === viewerId,
+            // Mismo recorte que `getMessages`: `path` se queda en el servidor.
+            ...(m.imagen
+              ? {
+                  imagen: {
+                    src: m.imagen.src,
+                    width: m.imagen.width,
+                    height: m.imagen.height,
+                  },
+                }
+              : null),
           };
         }),
       );
@@ -126,6 +138,43 @@ export function escucharSinLeer(
     },
     () => {
       /* misma razón que arriba: se queda con lo que ya había */
+    },
+  );
+}
+
+/** Hasta dónde leyó cada participante, en vivo.
+ *
+ *  Es lo que dibuja el "Visto" abajo del último mensaje propio. Va sobre el
+ *  documento de la conversación —no sobre los mensajes— porque `lastReadAt` es
+ *  un mapa `uid → timestamp` que vive ahí: marcar leído no escribe nada en el
+ *  mensaje.
+ *
+ *  Escucha aparte y no un campo más de `escucharMensajes` porque son dos
+ *  documentos distintos: la subcolección y su padre. Cuesta una escucha más,
+ *  que es el precio de que el "Visto" aparezca solo cuando el otro abre el
+ *  chat, sin recargar.
+ */
+export function escucharLectura(
+  conversationId: string,
+  onChange: (lastReadAt: Record<string, number>) => void,
+): () => void {
+  return onSnapshot(
+    doc(db, COL.conversacion, conversationId),
+    (snap) => {
+      const c = snap.data() as
+        | { lastReadAt?: Record<string, Timestamp | null> }
+        | undefined;
+
+      const salida: Record<string, number> = {};
+      for (const [uid, t] of Object.entries(c?.lastReadAt ?? {})) {
+        salida[uid] = t?.toMillis() ?? 0;
+      }
+      onChange(salida);
+    },
+    () => {
+      /*  Mismo criterio que las otras dos: sin el dato no se muestra el
+       *  "Visto", que es exactamente lo mismo que pasa cuando el otro todavía
+       *  no leyó. No hay nada que avisar. */
     },
   );
 }

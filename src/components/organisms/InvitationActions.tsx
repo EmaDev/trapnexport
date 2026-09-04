@@ -6,16 +6,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   CheckIcon,
+  ChevronIcon,
   CloseIcon,
-  HomeIcon,
   InstagramIcon,
   WhatsAppIcon,
 } from "@/components/atoms/icons";
 import {
   abrirWhatsApp,
-  compartirEnInstagram,
+  compartirTarjeta,
   prepararStory,
   textoWhatsApp,
+  type ResultadoTarjeta,
 } from "@/lib/invitacion/compartir";
 import type { StoryInput } from "@/lib/invitacion/story";
 import { APP_NAME } from "@/lib/site";
@@ -29,16 +30,24 @@ import { APP_NAME } from "@/lib/site";
  *  de producto, y arriba de un sobre todavía cerrado es peor todavía: sería
  *  ofrecerle compartir una invitación que no vio.
  *
- *  Son dos bloques con dos pesos distintos, y la diferencia de tamaño es la que
- *  los ordena: arriba, chicos y en dos columnas, compartir por WhatsApp y por
- *  Instagram; abajo, ancho completo y con una línea que lo explica, entrar a la
- *  app. Compartir es lo que la persona ya vino a hacer; entrar a la app es lo
- *  que queremos que haga después, y necesita decir por qué.
+ *  Son dos bloques con dos pesos distintos, y el peso es lo que los ordena:
+ *  arriba, dos botones de color en dos columnas, compartir por WhatsApp y por
+ *  Instagram; abajo, sólo texto y un link, entrar a la app. Compartir es lo que
+ *  la persona ya vino a hacer y son botones de verdad, con el color de cada
+ *  plataforma; entrar a la app es lo que queremos que haga después, así que no
+ *  compite con ellos —ni caja ni color propio, un link como cualquier otro de
+ *  la app— y necesita una línea que diga para qué.
  *
- *  No hay "copiar link": el link igual va al portapapeles solo antes de abrir
- *  la hoja de Instagram —que es el único momento en que hace falta, para pegar
- *  el sticker— y un botón para copiar la dirección de la página que ya se está
- *  mirando es una acción que casi nadie busca ocupando un cuarto de la barra.
+ *  Los dos botones de compartir hacen **lo mismo**: dibujan la tarjeta y la
+ *  dejan en el portapapeles, además de ofrecerla por la hoja del sistema cuando
+ *  hay una. Lo que cambia es a dónde va la persona después, y por eso siguen
+ *  siendo dos: WhatsApp abre el chat, Instagram no abre nada porque no se puede.
+ *  Lo que se comparte es la imagen y no el link: la invitación se ve en el chat
+ *  sin que nadie tenga que tocar nada.
+ *
+ *  No hay "copiar link": la dirección igual va adentro del mensaje de WhatsApp,
+ *  y un botón para copiar la dirección de la página que ya se está mirando es
+ *  una acción que casi nadie busca ocupando un cuarto de la barra.
  *
  *  El aviso de resultado es propio y no el `Snackbar` de la librería: esta ruta
  *  vive afuera del grupo `(app)`, sin su shell y sin su `SnackbarProvider`
@@ -62,87 +71,41 @@ export interface InvitationActionsProps {
 
 type Aviso = { texto: string; tono: "ok" | "error" } | null;
 
-/** El portapapeles, con techo de tiempo.
- *
- *  `writeText` no siempre rechaza: con el documento sin foco —que es justo lo
- *  que pasa cuando se abre la hoja de compartir del sistema— Chromium deja la
- *  promesa esperando a que el foco vuelva, y puede no volver. Es el mismo
- *  riesgo que cubre `conTecho` en `story.ts`: una promesa que no resuelve no
- *  falla, se queda, y dejaría el botón de Instagram en "Preparando…" sin un
- *  solo error en consola.
- *
- *  Devuelve `false` al vencer, y quien llama ajusta el mensaje: es la
- *  diferencia entre decirle a la persona que el link ya está copiado y pedirle
- *  que lo copie ella. */
-async function copiarAlPortapapeles(texto: string, techoMs = 1500): Promise<boolean> {
-  try {
-    return await Promise.race([
-      navigator.clipboard.writeText(texto).then(() => true),
-      new Promise<boolean>((resolver) => setTimeout(() => resolver(false), techoMs)),
-    ]);
-  } catch {
-    return false;
-  }
-}
-
 /* ── el botón ────────────────────────────────────────────────────────────── */
 
 function Boton({
   onClick,
-  href,
   icon,
   children,
   tono,
-  chico,
   disabled,
 }: {
   onClick?: () => void;
-  href?: string;
   icon: React.ReactNode;
   children: React.ReactNode;
-  /** `whatsapp` e `instagram` van con el color de la plataforma; `tenue` es el
-   *  botón de la app, que no compite con ellos */
-  tono: "whatsapp" | "instagram" | "tenue";
-  /** los de compartir, que van de a dos por fila */
-  chico?: boolean;
+  /** los dos únicos que quedan: el de la app ya no es un botón, es un link
+   *  de texto — ver más abajo */
+  tono: "whatsapp" | "instagram";
   disabled?: boolean;
 }) {
-  const base =
-    // `w-full` porque los de compartir viven en celdas de un grid de dos
-    // columnas y un `button` con `display:flex` sigue midiendo por su
-    // contenido: sin esto, "WhatsApp" salía más angosto que "Instagram" en la
-    // misma fila.
-    "flex w-full items-center justify-center gap-2 font-semibold transition-transform active:scale-[0.97] disabled:opacity-60";
-
-  // La jerarquía es de tamaño y no de color: los tres botones tienen que poder
-  // convivir sin que ninguno grite. Compartir es lo urgente pero no lo más
-  // importante, así que va chico; entrar a la app va ancho.
-  const medida = chico
-    ? "rounded-xl px-3 py-2 text-[13px]"
-    : "rounded-2xl px-4 py-3 text-sm";
-
   const tonos = {
     // Los verdes y el degradé son los de las plataformas, no los de la marca:
     // un botón de WhatsApp en violeta no se reconoce como el de WhatsApp.
     whatsapp: "bg-[#25D366] text-[#052e16] shadow-md shadow-[#25D366]/20",
     instagram:
       "bg-[linear-gradient(95deg,#F58529,#DD2A7B_45%,#8134AF_75%,#515BD4)] text-white shadow-md shadow-[#DD2A7B]/20",
-    tenue: "border border-white/25 bg-white/10 text-white backdrop-blur",
   } as const;
 
-  const clase = `${base} ${medida} ${tonos[tono]}`;
-
-  if (href) {
-    return (
-      <Link href={href} className={clase}>
-        {icon}
-        {children}
-      </Link>
-    );
-  }
-
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={clase}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      // `w-full` porque los dos viven en celdas de un grid de dos columnas y
+      // un `button` con `display:flex` sigue midiendo por su contenido: sin
+      // esto, "WhatsApp" salía más angosto que "Instagram" en la misma fila.
+      className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2 text-[13px] font-semibold transition-transform active:scale-[0.97] disabled:opacity-60 ${tonos[tono]}`}
+    >
       {icon}
       {children}
     </button>
@@ -158,14 +121,17 @@ export function InvitationActions({
   visible,
 }: InvitationActionsProps) {
   const [aviso, setAviso] = useState<Aviso>(null);
-  const [preparando, setPreparando] = useState(false);
+  /** cuál de los dos botones está trabajando; los dos se bloquean mientras
+   *  tanto, para que dos toques seguidos no abran dos hojas del sistema */
+  const [ocupado, setOcupado] = useState<"whatsapp" | "instagram" | null>(null);
 
   // El PNG de la story, dibujado apenas monta la pantalla y guardado acá.
   //
-  // No es una optimización: es lo que hace que el botón de Instagram funcione
-  // en iOS. Safari exige que `navigator.share` salga del gesto del usuario y
-  // descarta la llamada si en el medio hubo un `await` largo — y dibujar
-  // 1080×1920 lo es. Con el blob ya hecho, el click comparte de una.
+  // No es una optimización: es lo que hace que los botones funcionen en iOS.
+  // Safari exige que `navigator.share` —y también `clipboard.write`— salgan del
+  // gesto del usuario y descarta la llamada si en el medio hubo un `await`
+  // largo, y dibujar 1080×1920 lo es. Con el blob ya hecho, el click comparte
+  // de una.
   const png = useRef<Blob | null>(null);
   const dibujando = useRef<Promise<Blob | null> | null>(null);
 
@@ -192,42 +158,73 @@ export function InvitationActions({
 
   const texto = textoWhatsApp(story.club, story.titulo, url);
 
-  const alWhatsApp = useCallback(() => abrirWhatsApp(texto), [texto]);
+  /** La imagen, como **promesa** y sin esperarla: `compartirTarjeta` la
+   *  necesita así para poder armar el `ClipboardItem` en el mismo tick del
+   *  click aunque el dibujo todavía no haya terminado. Si el efecto de arriba
+   *  no llegó a arrancar —un toque muy rápido—, se dibuja acá. */
+  const imagen = useCallback((): Promise<Blob | null> => {
+    if (png.current) return Promise.resolve(png.current);
+    dibujando.current ??= prepararStory(story).then((b) => {
+      png.current = b;
+      return b;
+    });
+    return dibujando.current;
+  }, [story]);
 
-  const alInstagram = useCallback(async () => {
-    setPreparando(true);
-    try {
-      // El link va al portapapeles **antes** de abrir la hoja: Instagram no
-      // acepta links por el share, así que la única forma de que la story lleve
-      // a la invitación es que la persona pegue el sticker de link a mano.
-      // Copiarlo después llega tarde: para entonces ya está en Instagram.
-      const copiado = await copiarAlPortapapeles(url);
-
-      const blob = png.current ?? (await (dibujando.current ?? prepararStory(story)));
-      png.current = blob;
-
-      const resultado = await compartirEnInstagram(blob, story.invitado, texto);
-      if (resultado === "cancelado") return;
-
-      // Sin botón de copiar, el link sólo llega al portapapeles por acá: si el
-      // copiado falló no hay a dónde mandar a la persona, así que el mensaje no
-      // lo menciona en vez de pedirle algo que no puede hacer.
-      const conLink = copiado ? " El link quedó copiado por si querés pegarlo." : "";
-
+  /** El mensaje de después. Dice qué hacer con la tarjeta, y qué hacer depende
+   *  de dónde quedó: pegarla si está en el portapapeles, buscarla si se bajó.
+   *  `sistema` y `cancelado` no dicen nada — en el primero la hoja nativa ya
+   *  dio su propia devolución y en el segundo la persona decidió salir. */
+  const avisar = useCallback(
+    (resultado: ResultadoTarjeta, pegar: string, bajada: string) => {
+      if (resultado === "sistema" || resultado === "cancelado") return;
       setAviso(
-        resultado === "sistema"
-          ? { texto: `Listo.${conLink}`, tono: "ok" }
+        resultado === "portapapeles"
+          ? { texto: `Copiamos la tarjeta: ${pegar}`, tono: "ok" }
           : resultado === "descarga"
-            ? { texto: `Bajamos la imagen: subila a tu historia.${conLink}`, tono: "ok" }
+            ? { texto: `Bajamos la tarjeta: ${bajada}`, tono: "ok" }
             : { texto: "No pudimos preparar la imagen", tono: "error" },
       );
+    },
+    [],
+  );
+
+  const alWhatsApp = useCallback(async () => {
+    setOcupado("whatsapp");
+    try {
+      const resultado = await compartirTarjeta(imagen(), story.invitado, texto);
+      if (resultado === "sistema" || resultado === "cancelado") return;
+
+      // La imagen ya está —copiada o bajada— pero todavía no está en ningún
+      // chat: acá es donde `wa.me` sigue sirviendo. Va después de compartir y
+      // no antes porque abrir la pestaña le saca el foco al documento, y sin
+      // foco Chrome rechaza la escritura del portapapeles.
+      if (resultado !== "error") abrirWhatsApp(texto);
+      avisar(resultado, "pegala en el chat.", "adjuntala en el chat.");
     } finally {
       // En el `finally` y no al final del cuerpo: si el dibujo o la hoja del
       // sistema tiran, el botón tiene que volver a servir. Deshabilitado para
       // siempre es peor que el error que lo dejó así.
-      setPreparando(false);
+      setOcupado(null);
     }
-  }, [story, texto, url]);
+  }, [avisar, imagen, story.invitado, texto]);
+
+  const alInstagram = useCallback(async () => {
+    setOcupado("instagram");
+    try {
+      const resultado = await compartirTarjeta(imagen(), story.invitado, texto);
+      // Instagram no tiene un `wa.me`: no existe un intent web que suba una
+      // story. Donde no hubo hoja del sistema, la tarjeta queda en el
+      // portapapeles y la persona la pega ella.
+      avisar(
+        resultado,
+        "pegala en tu historia o en un chat.",
+        "subila a tu historia.",
+      );
+    } finally {
+      setOcupado(null);
+    }
+  }, [avisar, imagen, story.invitado, texto]);
 
   /** La entrada escalonada de cada botón, colgada de `visible`.
    *
@@ -256,39 +253,43 @@ export function InvitationActions({
           <motion.div {...entrada(0)}>
             <Boton
               tono="whatsapp"
-              chico
               icon={<WhatsAppIcon width={16} height={16} />}
               onClick={alWhatsApp}
+              disabled={ocupado !== null}
             >
-              WhatsApp
+              {ocupado === "whatsapp" ? "Preparando…" : "WhatsApp"}
             </Boton>
           </motion.div>
 
           <motion.div {...entrada(1)}>
             <Boton
               tono="instagram"
-              chico
               icon={<InstagramIcon width={16} height={16} />}
               onClick={alInstagram}
-              disabled={preparando}
+              disabled={ocupado !== null}
             >
-              {preparando ? "Preparando…" : "Instagram"}
+              {ocupado === "instagram" ? "Preparando…" : "Instagram"}
             </Boton>
           </motion.div>
         </div>
 
-        {/* La app. El texto va **arriba** del botón y no adentro: el botón dice
-            a dónde lleva y la línea dice para qué, y meter las dos cosas en la
-            etiqueta daría un botón de dos renglones que ya no se lee de un
-            golpe. */}
+        {/* La app. Ya no es un botón: al lado de un verde y un degradé
+            cualquier caja compite con ellos, y esto es lo que la persona hace
+            después de compartir, no al mismo tiempo. Un link de texto —el
+            mismo trato que el handle en `PlayerSpotlight`— alcanza y no le
+            pelea la fila a los dos de arriba. */}
         <motion.div {...entrada(2)} className="flex flex-col items-center gap-2.5">
           <p className="text-center text-sm leading-relaxed text-white/70 text-pretty">
             Entrá a {APP_NAME} para ver el cronograma del día, las novedades y
             quiénes más van.
           </p>
-          <Boton tono="tenue" icon={<HomeIcon width={18} height={18} />} href="/">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-0.5 py-1 text-sm font-semibold text-white transition-opacity active:opacity-70"
+          >
             Ir a {APP_NAME}
-          </Boton>
+            <ChevronIcon width={14} height={14} />
+          </Link>
         </motion.div>
       </div>
 

@@ -7,6 +7,7 @@ import { requireAdmin } from "@/lib/admin/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { COL } from "@/lib/firebase/collections";
 import type { UserDoc } from "@/lib/firebase/schema";
+import { saneaFicha, type FichaInput } from "@/lib/social/ficha";
 
 /** Escrituras del panel sobre cuentas reales.
  *
@@ -110,6 +111,50 @@ export async function rechazarSolicitud(uid: string): Promise<ResultadoRevision>
   }
 
   revalidar();
+  return { ok: true };
+}
+
+/** Carga la ficha deportiva de una cuenta desde el panel.
+ *
+ *  Es la misma ficha que la persona edita en `/perfil` y el mismo documento:
+ *  no hay una copia del club. Existe porque la ficha es opcional y buena parte
+ *  del plantel no la completa —o la completa a medias—, y lo que se muestra en
+ *  `/historia` sale de ahí: sin esta acción, la única forma de que la
+ *  trayectoria de alguien tenga sus skills sería pedirle que entre y las
+ *  cargue.
+ *
+ *  **Pisa lo que haya**, incluso lo que cargó la persona, y no hay forma de que
+ *  no lo haga: la ficha se guarda entera, así que "completá lo que falta" y
+ *  "reemplazá todo" son la misma escritura. Por eso el formulario del panel
+ *  abre con los valores actuales y no vacío — lo que se guarda es lo que se ve.
+ *
+ *  Comparte `saneaFicha` con `updateFicha`: los dos caminos escriben la misma
+ *  clave, y un rango validado de un solo lado es un rango que no existe.
+ */
+export async function guardarFichaDeCuenta(
+  uid: string,
+  input: FichaInput,
+): Promise<ResultadoRevision> {
+  await requireAdmin();
+  const ref = adminDb().collection(COL.user).doc(uid);
+
+  const snap = await ref.get();
+  const u = snap.data() as UserDoc | undefined;
+  if (!u) return { ok: false, error: "Esa cuenta ya no existe." };
+
+  await ref.update({
+    ficha: saneaFicha(input),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  // La ficha se ve en cuatro lugares y ninguno es `/admin/usuarios`, así que
+  // este no usa `revalidar()`: la trayectoria pública, el perfil de la persona,
+  // su propia pantalla de perfil y la solapa desde la que se acaba de editar.
+  revalidatePath("/historia");
+  revalidatePath("/perfil");
+  revalidatePath(`/u/${u.handle}`);
+  revalidatePath("/admin/historia");
+
   return { ok: true };
 }
 
