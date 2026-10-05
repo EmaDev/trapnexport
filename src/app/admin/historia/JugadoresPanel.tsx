@@ -19,9 +19,11 @@ import { ClipsEditor, FotosEditor, FraseEditor } from "./medios";
 
 /** Solapa "Jugadores": las fichas de trayectoria de `/historia`.
  *
- *  Es la ficha larga del panel —veinte campos y cinco listas— porque es la
- *  pantalla más larga de la app pública: `PlayerSpotlight` muestra datos
- *  personales, skills, carrera, álbum y frase.
+ *  Es la ficha larga del panel —veinte campos y cinco listas—, pero no todo
+ *  sale a la pantalla pública del mismo modo: `PlayerSpotlight` muestra ficha,
+ *  números, álbum y frase para todos, y la bio y la carrera **sólo en las
+ *  leyendas**. Las skills se siguen cargando y guardando acá —no se borró
+ *  nada— y hoy no se dibujan en `/historia`; viven en el perfil de la persona.
  *
  *  Dos cosas que el formulario deja explícitas y conviene no perder:
  *
@@ -29,9 +31,9 @@ import { ClipsEditor, FotosEditor, FraseEditor } from "./medios";
  *    después queda fijo: es el `?jugador=` que se comparte por WhatsApp y el
  *    `playerId` con el que lo referencia el salón de cada temporada. Cambiarlo
  *    rompería los dos.
- *  - **Las skills y la frase pueden ir vacías.** No es un formulario a medio
- *    llenar: `PlayerSpotlight` tiene un guard para eso, y existe por la ficha
- *    de Yannick Castelo, que va sin datos inventados a propósito.
+ *  - **La frase puede ir vacía.** No es un formulario a medio llenar:
+ *    `PlayerSpotlight` tiene un guard para eso, y existe por la ficha de
+ *    Yannick Castelo, que va sin datos inventados a propósito.
  */
 
 const ESTADOS: { value: PlayerStatus; label: string }[] = [
@@ -121,10 +123,11 @@ export function JugadoresPanel({ players }: { players: Player[] }) {
       width: "3fr",
       render: (p) => (
         <div className="flex min-w-0 items-center gap-3">
-          {p.avatar && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={p.avatar} alt="" className="size-9 shrink-0 rounded-full object-cover" />
-          )}
+          {/* Sin condicional: `getPlayers()` siempre resuelve un avatar —la foto
+              cargada, la de su cuenta o las iniciales generadas—, y con el
+              `&&` las filas sin foto quedaban sin círculo y desalineadas. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={p.avatar} alt="" className="size-9 shrink-0 rounded-full object-cover" />
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 font-medium">
               <span className="truncate">{p.name}</span>

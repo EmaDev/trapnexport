@@ -49,18 +49,38 @@ export interface OpcionEncuesta {
   id: string;
   texto: string;
   votos: number;
-  /** URL de una imagen o un video: la opción se muestra como media, no como
-   *  texto. Se distingue imagen de video por la extensión de la URL. */
+  /** URL de la **imagen** de la opción: se muestra como media y no como texto,
+   *  y las opciones se votan desde un carrusel —una imagen por opción—. El
+   *  video no va acá: es uno solo para toda la encuesta y vive en
+   *  `Encuesta.video`. Ver `contenido/media.ts`. */
   media?: string;
 }
 
 export interface Encuesta {
   id: string;
+  /** el nombre corto con el que se anuncia la categoría ("Mejor arquero"), que
+   *  es lo que titula el desplegable del feed y la placa de la gala. Distinto de
+   *  la pregunta, que es lo que se le pregunta al que vota. Vacío = se cae al
+   *  nombre de `PREMIOS` y, si no está, a la pregunta. Ver `EncuestaDoc`. */
+  nombre?: string;
   pregunta: string;
   descripcion?: string;
+  /** URL de **un** video para toda la encuesta: se muestra arriba, una sola
+   *  vez, y las opciones van debajo como lista.
+   *
+   *  Es un campo de la encuesta y no de la opción porque el clip es el material
+   *  sobre el que se vota —la compilación de los goles— y no una de las
+   *  alternativas. Las imágenes sí son por opción. Ver `contenido/media.ts`. */
+  video?: string;
   opciones: OpcionEncuesta[];
   /** permite elegir más de una opción */
   multiple: boolean;
+  /** con `multiple`, cuántas se pueden elegir —y cuántas ganan—. 0 o vacío =
+   *  sin tope, y en la gala gana una sola. */
+  maxOpciones?: number;
+  /** la posición en el orden en que se anuncian las categorías; vacío = se cae
+   *  al orden de `PREMIOS`. Ver `EncuestaDoc.orden`. */
+  orden?: number;
   /** los porcentajes se ven mientras la votación está abierta. En `false` el
    *  `Poll` va en modo anónimo: no muestra barras, totales ni el voto propio. */
   resultadosVisibles: boolean;
@@ -164,6 +184,66 @@ export interface Evento {
   createdAt: number;
 }
 
+/* ── portada de la home ──────────────────────────────────────────────────── */
+
+/** De dónde sale el momento al que cuenta el contador de la home.
+ *
+ *  `cronograma` lo ata al día del cronograma —el dato que el panel ya mantiene,
+ *  así que mover el evento mueve el contador— y `fija` a una fecha propia, para
+ *  lo que no es el evento. Ver `PortadaCountdownDoc`. */
+export type OrigenCuentaRegresiva = "cronograma" | "fija";
+
+/** La cuenta regresiva de la home, tal como se carga en el panel. */
+export interface CuentaRegresiva {
+  activa: boolean;
+  origen: OrigenCuentaRegresiva;
+  /** "YYYY-MM-DD" — sólo cuenta con `origen: "fija"` */
+  fecha: string;
+  /** "HH:mm" — sólo cuenta con `origen: "fija"` */
+  hora: string;
+  eyebrow: string;
+  titulo: string;
+  mensajeFinal: string;
+}
+
+/** Un slide del carrusel de la home. */
+export interface SlidePortada {
+  src: string;
+  alt: string;
+  caption: string;
+}
+
+/** Lo que manda el formulario de `/admin/portada`: el documento entero.
+ *
+ *  Una sola entrada para el contador y los slides porque son un solo documento
+ *  (`trapnexport-config/portada`): dos acciones separadas dejarían el estado en
+ *  el que el carrusel se guardó y el contador no. */
+export interface PortadaInput {
+  countdown: CuentaRegresiva;
+  slides: SlidePortada[];
+}
+
+/** Tope de slides del carrusel. No es un límite técnico: un carrusel de
+ *  portada que nadie va a pasar doce veces. */
+export const MAX_SLIDES = 10;
+
+/** Lo que trae una portada recién creada, antes de que el panel la toque.
+ *
+ *  El contador arranca **encendido y atado al cronograma**: así la home cuenta
+ *  al evento real desde el primer día, sin que nadie cargue nada. */
+export const PORTADA_VACIA: PortadaInput = {
+  countdown: {
+    activa: true,
+    origen: "cronograma",
+    fecha: "",
+    hora: "21:00",
+    eyebrow: "Próximo evento",
+    titulo: "",
+    mensajeFinal: "Ya está acá.",
+  },
+  slides: [],
+};
+
 /* ── etiquetas compartidas ───────────────────────────────────────────────── */
 
 /** El tipo de evento define su color, y el color tiene que ser el mismo en la
@@ -260,9 +340,10 @@ export type NoticiaInput = Omit<Noticia, "id" | "cover" | "createdAt" | "updated
   id?: string;
 };
 
-/** Una opción tal como la carga el formulario: texto y, para videos o
+/** Una opción tal como la carga el formulario: texto y, para las encuestas de
  *  imágenes, la URL en `media`. Sin votos —no se editan a mano desde el panel—
- *  ni `id` —lo pone la acción al guardar—. */
+ *  ni `id` —lo pone la acción al guardar—. El video de la encuesta viaja en
+ *  `EncuestaInput.video`, no acá. */
 export interface OpcionInput {
   texto: string;
   media?: string;

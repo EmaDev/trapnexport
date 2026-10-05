@@ -8,7 +8,7 @@ import {
   DatePicker,
   Input,
   Select,
-  Tabs,
+  TabsGlow,
   Textarea,
   TimePicker,
   useSnackbar,
@@ -221,7 +221,17 @@ export function CronogramaClient({
   return (
     <>
       {/* ── el día, una sola vez para todo el cronograma ─────────────────── */}
-      <Card variant="outline" padding="md" className="mb-4">
+      {/* El calendario del `DatePicker` es un `absolute` dentro de su propio
+          wrapper, no un portal, y `Card` trae `overflow-hidden` fijo en su
+          className —no hay prop para apagarlo—: desplegado quedaba recortado
+          contra el borde de la card. `!overflow-visible` lo libera, y el
+          `relative z-50` lo deja por encima de lo que viene después (las
+          solapas y la tabla, que tienen cabeceras sticky de hasta z-40). */}
+      <Card
+        variant="outline"
+        padding="md"
+        className="relative z-50 mb-4 !overflow-visible"
+      >
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-muted">
@@ -247,14 +257,13 @@ export function CronogramaClient({
       </Card>
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Tabs
+        <TabsGlow
           items={[
             { id: "dia", label: "Día" },
             { id: "lista", label: "Lista" },
           ]}
           value={vista}
           onChange={(v) => setVista(v as typeof vista)}
-          variant="segmented"
           size="sm"
         />
         <Button onClick={() => openNew()}>Nuevo evento</Button>

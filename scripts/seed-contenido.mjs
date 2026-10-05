@@ -13,10 +13,14 @@
 // crea las categorías que falten (por ejemplo si se sumó un premio nuevo).
 //
 // El `createdAt` se escribe escalonado —un minuto por premio— y no con
-// `serverTimestamp()`: `/admin/presentacion` ordena las categorías por
-// `createdAt` y espera el orden de `PREMIOS`, que es el orden en que se anuncian
-// en la gala. Diecisiete escrituras en el mismo lote quedarían con timestamps
-// casi idénticos y el orden sería aleatorio.
+// `serverTimestamp()`: diecisiete escrituras en el mismo lote quedarían con
+// timestamps casi idénticos. El escalón va **hacia adelante** (el primer premio
+// es el más viejo) para que la fecha no contradiga el orden de `PREMIOS`.
+//
+// El orden de la gala igual no sale de acá: lo pone `ordenDePremio`
+// (`src/lib/trap-awards.ts`), que es lo que usan el feed y `/admin/presentacion`.
+// Antes sí salía del `createdAt`, y como el escalón iba hacia atrás las dos
+// pantallas mostraban las categorías al revés.
 
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
@@ -120,16 +124,22 @@ PREMIOS.forEach((premio, i) => {
     // Los premios de video nacen en borrador: sus opciones son de relleno hasta
     // que se carguen los clips.
     estado: esPremioDeVideo(premio) ? "borrador" : "abierta",
-    createdAt: Timestamp.fromMillis(base - i * 60_000),
+    createdAt: Timestamp.fromMillis(base - (PREMIOS.length - 1 - i) * 60_000),
   });
   nuevas++;
 });
 
 if (nuevas) await batch.commit();
 
+// Las que faltan son las que están en `PREMIOS` y no en la base: típicamente un
+// premio que se agregó al código después de la primera corrida. Se listan por id
+// porque es la única forma de notar que una categoría nunca llegó al feed.
+const faltaban = PREMIOS.filter((p) => !existentes.has(p.id)).map((p) => p.id);
+
 console.log(
-  `${COL.encuesta}: ${PREMIOS.length} categorías (${nuevas} nuevas, ` +
-    `${PREMIOS.length - nuevas} ya existían y se conservaron con sus votos).`,
+  `${COL.encuesta}: ${PREMIOS.length} categorías en el código, ` +
+    `${existentes.size} ya estaban en la base y se conservaron con sus votos, ` +
+    `${nuevas} nuevas${nuevas ? ` (${faltaban.join(", ")})` : ""}.`,
 );
 
 process.exit(0);

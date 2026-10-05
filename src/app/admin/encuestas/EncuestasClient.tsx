@@ -6,7 +6,6 @@ import {
   CheckboxGroup,
   DataTable,
   Input,
-  Poll,
   Select,
   Switch,
   Textarea,
@@ -16,7 +15,10 @@ import {
 } from "lib-kit-components";
 
 import { ChevronIcon, CloseIcon, PlusIcon } from "@/components/atoms/icons";
+import { EncuestaPoll } from "@/components/organisms/EncuestaPoll";
+import { VideoEncuesta } from "@/components/organisms/VideoEncuesta";
 import { deleteEncuesta, saveEncuesta, setEncuestaEstado } from "@/lib/contenido/actions";
+import { esUrl, esVideo, imagenDeOpcion, videoDeEncuesta } from "@/lib/contenido/media";
 import type { EncuestaRow } from "@/lib/contenido/queries";
 import { ESTADO_ENCUESTA, type EncuestaInput, type OpcionInput } from "@/lib/contenido/types";
 import { JUGADORES } from "@/lib/trap-awards";
@@ -30,21 +32,30 @@ import { ConfirmDialog, EstadoPill, FormModal, RowMenu } from "../Dialogs";
  *      plantel: un desplegable con todos los jugadores y una casilla "Todos".
  *      Lo elegido se guarda con el nombre tal cual —es lo que espera el feed—.
  *      Aparte están las opciones escritas a mano, para lo que no es un jugador
- *      ("Voto en blanco", "Ninguno", una frase) y para videos o imágenes: cada
+ *      ("Voto en blanco", "Ninguno", una frase) y para las imágenes: cada
  *      opción manual puede llevar una URL en `media` y entonces se vota sobre
- *      la imagen o el video, no sobre el texto. Las dos listas se concatenan
- *      en `form.opciones` como `[...jugadores, ...manuales]`.
+ *      la imagen y no sobre el texto. Las dos listas se concatenan en
+ *      `form.opciones` como `[...jugadores, ...manuales]`.
  *
- *  2 · La vista previa es el mismo `Poll` que ve el socio, en modo resultados.
- *      Es la única forma de ver antes de publicar si la pregunta y las opciones
- *      entran, que es el error más común al cargar una encuesta.
+ *  2 · La media tiene **dos** campos y no uno. El video es de la encuesta
+ *      (`form.video`): es uno solo, se muestra arriba y las opciones van
+ *      debajo como lista. Las imágenes son de la opción (`media`): una por
+ *      opción, y se votan desde un carrusel. Ver `lib/contenido/media.ts`.
+ *
+ *  3 · La vista previa es el mismo `EncuestaPoll` que ve el socio, en modo
+ *      resultados. Es la única forma de ver antes de publicar si la pregunta y
+ *      las opciones entran, que es el error más común al cargar una encuesta.
  */
 
 const VACIA: EncuestaInput = {
+  nombre: "",
   pregunta: "",
   descripcion: "",
+  video: "",
   opciones: [],
   multiple: false,
+  maxOpciones: 0,
+  orden: undefined,
   resultadosVisibles: true,
   estado: "borrador",
 };
@@ -55,25 +66,21 @@ const VACIA: EncuestaInput = {
 const NOMBRES_JUGADORES = JUGADORES.map((j) => j.nombre);
 const ES_JUGADOR = new Set(NOMBRES_JUGADORES);
 
-/** Una URL http(s) a secas: es lo que habilita el preview de la media. */
-const esUrl = (s: string) => /^https?:\/\/\S+$/i.test(s.trim());
-
-/** Distingue video de imagen por la extensión de la URL. Todo lo que no sea un
- *  contenedor de video conocido se trata como imagen. */
-const esVideo = (url: string) => /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url.trim());
-
-/** Una opción del formulario → `PollOption`, con la media en `video`/`image`
- *  cuando la URL es válida. El `label` cae al texto, y si no hay, al nombre del
- *  archivo o a "Opción N": `Poll` lo necesita sí o sí. */
+/** Una opción del formulario → `PollOption`, con la imagen en `image` cuando
+ *  la URL es válida. El video no entra acá: es de la encuesta. El `label` cae
+ *  al texto, y si no hay, al nombre del archivo o a "Opción N": `Poll` lo
+ *  necesita sí o sí. */
 const aPollOption = (o: OpcionInput, i: number): PollOption => {
-  const media = o.media?.trim();
+  const imagen = imagenDeOpcion(o.media);
   const label =
-    o.texto.trim() || (media ? media.split(/[/?#]/).filter(Boolean).pop() : "") || `Opción ${i + 1}`;
+    o.texto.trim() ||
+    (imagen ? imagen.split(/[/?#]/).filter(Boolean).pop() : "") ||
+    `Opción ${i + 1}`;
   return {
     id: `p${i}`,
     label,
     votes: 0,
-    ...(media && esUrl(media) ? (esVideo(media) ? { video: media } : { image: media }) : {}),
+    ...(imagen ? { image: imagen } : {}),
   };
 };
 
@@ -134,10 +141,14 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
     setPlantelOpen(false);
     setForm({
       id: row.id,
+      nombre: row.nombre ?? "",
       pregunta: row.pregunta,
       descripcion: row.descripcion ?? "",
+      video: row.video ?? "",
       opciones: row.opciones.map((o) => ({ texto: o.texto, media: o.media })),
       multiple: row.multiple,
+      maxOpciones: row.maxOpciones ?? 0,
+      orden: row.orden,
       resultadosVisibles: row.resultadosVisibles,
       estado: row.estado,
     });
@@ -147,12 +158,14 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
   const validas = form.opciones.filter((o) => o.texto.trim() || o.media?.trim()).length;
   const incompleta = !form.pregunta.trim() || validas < 2;
 
-  // La vista previa: las opciones ya como `PollOption`. Si alguna trae media,
-  // el `Poll` pasa a `layout="media"` y se votan desde el carrusel.
+  // La vista previa: las opciones ya como `PollOption`. Qué vista le toca
+  // —video arriba, carrusel de imágenes o lista— lo decide `EncuestaPoll` con
+  // la media, igual que en el feed.
   const opcionesPreview = form.opciones
     .filter((o) => o.texto.trim() || o.media?.trim())
     .map(aPollOption);
-  const hayMedia = opcionesPreview.some((o) => o.image || o.video);
+  const videoPreview = videoDeEncuesta(form.video, form.opciones);
+  const videoInvalido = !!form.video?.trim() && !esUrl(form.video);
 
   const submit = () => {
     const editando = !!form.id;
@@ -201,7 +214,11 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
       width: "3fr",
       render: (row) => (
         <div className="min-w-0">
-          <p className="truncate font-medium">{row.pregunta}</p>
+          {/* El nombre arriba y la pregunta debajo: es el mismo par que ve el
+              socio —título del desplegable y pregunta adentro— y así se nota
+              desde la tabla si una categoría quedó con el nombre de otra. */}
+          <p className="truncate font-medium">{row.nombre || row.pregunta}</p>
+          <p className="truncate text-xs text-muted">{row.pregunta}</p>
           <p className="text-xs text-muted">
             {row.opciones.length} opciones · {row.multiple ? "múltiple" : "única"} ·{" "}
             {row.resultadosVisibles ? "resultados visibles" : "resultados ocultos"}
@@ -300,13 +317,27 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
         onSubmit={submit}
         size="lg"
       >
+        {/* El nombre es lo que **titula** la categoría: el desplegable del feed
+            y la placa de la gala. Es distinto de la pregunta a propósito —la
+            placa anuncia, no pregunta— y va primero porque es el campo que antes
+            no existía: el título salía de una lista hardcodeada cruzada por id,
+            así que renombrar una votación acá no cambiaba lo que se veía. */}
+        <Input
+          label="Nombre del premio"
+          hint="Corto: es el título del desplegable en el feed y el de la placa en la gala. Vacío, se usa la pregunta."
+          value={form.nombre ?? ""}
+          onChange={(e) => set("nombre", e.target.value)}
+          maxLength={60}
+          placeholder="Mejor gol"
+          autoFocus
+        />
+
         <Input
           label="Pregunta"
           value={form.pregunta}
           onChange={(e) => set("pregunta", e.target.value)}
           maxLength={160}
           placeholder="¿Cuál fue el mejor gol de la temporada?"
-          autoFocus
         />
 
         <Textarea
@@ -318,6 +349,27 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           rows={2}
           autoResize
         />
+
+        {/* El video es de la encuesta y no de la opción: es uno solo, va
+            arriba y las opciones quedan debajo como lista. Acepta un archivo
+            (.mp4, .webm…) o un link de YouTube en cualquiera de sus formas
+            —`watch?v=`, `youtu.be`, `/shorts/`—: lo que se pega es la URL que
+            copia el navegador, sin tocarla. */}
+        <Input
+          label="URL del video (opcional)"
+          hint="Un solo video para toda la encuesta: va arriba y las opciones quedan debajo. Archivo .mp4 o link de YouTube."
+          value={form.video ?? ""}
+          onChange={(e) => set("video", e.target.value)}
+          maxLength={400}
+          placeholder="https://www.youtube.com/watch?v=…"
+          error={videoInvalido ? "Tiene que empezar con http:// o https://" : undefined}
+        />
+
+        {videoPreview && (
+          <div className="overflow-hidden rounded-lg border border-border bg-surface-alt">
+            <VideoEncuesta video={videoPreview} />
+          </div>
+        )}
 
         <fieldset className="flex flex-col gap-3">
           <legend className="mb-1 text-sm font-medium">Opciones</legend>
@@ -393,11 +445,11 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           )}
 
           {/* Opciones escritas a mano, para lo que no es un jugador ("Voto en
-              blanco", "Ninguno", una frase) y para videos o imágenes. El
-              rótulo va en `label` y no en `placeholder`: el `Input` de la
-              librería es de etiqueta flotante y sin `label` renderiza
-              `placeholder=""`. La URL es opcional: con ella la opción se vota
-              como media y el texto pasa a ser el pie. */}
+              blanco", "Ninguno", una frase) y para las imágenes. El rótulo va
+              en `label` y no en `placeholder`: el `Input` de la librería es de
+              etiqueta flotante y sin `label` renderiza `placeholder=""`. La
+              URL es opcional: con ella la opción se vota como imagen y el
+              texto pasa a ser el pie. */}
           {manuales.map((o, i) => {
             const url = o.media?.trim();
             return (
@@ -425,7 +477,8 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
                 </div>
 
                 <Input
-                  label="URL de imagen o video (opcional)"
+                  label="URL de imagen (opcional)"
+                  hint="Una imagen por opción: se votan desde un carrusel."
                   value={o.media ?? ""}
                   onChange={(e) => setManual(i, "media", e.target.value)}
                   maxLength={400}
@@ -435,25 +488,25 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
                   }
                 />
 
-                {url && esUrl(url) && (
-                  <div className="overflow-hidden rounded-lg border border-border bg-surface-alt">
-                    {esVideo(url) ? (
-                      <video
-                        src={url}
-                        controls
-                        preload="metadata"
-                        className="max-h-40 w-full object-contain"
-                      />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={url}
-                        alt=""
-                        className="max-h-40 w-full object-contain"
-                      />
-                    )}
-                  </div>
-                )}
+                {url &&
+                  esUrl(url) &&
+                  /* Un video pegado en una opción no se vota desde el carrusel:
+                     sube al encabezado como el video de la encuesta (lo hace
+                     `videoDeEncuesta`). Se avisa en vez de rechazarlo, porque
+                     es lo que quedó cargado en las encuestas de antes de que el
+                     video fuera uno solo. */
+                  (esVideo(url) ? (
+                    <p className="text-xs text-muted">
+                      Es un video: se usa como el video de la encuesta, arriba de las opciones.
+                      Si querés otro, cargalo en{" "}
+                      <b className="text-foreground">URL del video</b>.
+                    </p>
+                  ) : (
+                    <div className="overflow-hidden rounded-lg border border-border bg-surface-alt">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="" className="max-h-40 w-full object-contain" />
+                    </div>
+                  ))}
               </div>
             );
           })}
@@ -471,7 +524,7 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
 
           <p className="text-xs text-muted">
             Hacen falta al menos dos opciones entre jugadores y manuales. Pegá
-            una URL para votar sobre una imagen o un video.
+            una URL de imagen para votar sobre las imágenes, una por opción.
           </p>
         </fieldset>
 
@@ -486,11 +539,41 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           onChange={(v) => set("estado", v as EncuestaInput["estado"])}
         />
 
+        {/* El orden en que se anuncian las categorías, en el feed y en la gala.
+            Vacío cae al orden de los premios sembrados y, si tampoco es uno de
+            esos, al final por fecha de alta. */}
+        <Input
+          label="Orden"
+          type="number"
+          hint="En qué puesto se anuncia. Vacío, va al final."
+          value={form.orden ?? ""}
+          onChange={(e) =>
+            set("orden", e.target.value === "" ? undefined : Number(e.target.value))
+          }
+          min={0}
+          placeholder="1"
+        />
+
         <Switch
           checked={form.multiple}
           onChange={(v) => set("multiple", v)}
           label="Permitir elegir más de una opción"
         />
+
+        {/* El tope sólo aplica a las múltiples, y es también cuántas ganan: el
+            once ideal son once votos y once ganadores. En 0 no hay tope y la
+            gala anuncia una sola ganadora. */}
+        {form.multiple && (
+          <Input
+            label="Cuántas se pueden elegir"
+            type="number"
+            hint="Es también cuántas ganan. 0 = sin tope y gana una sola."
+            value={form.maxOpciones ?? 0}
+            onChange={(e) => set("maxOpciones", Number(e.target.value) || 0)}
+            min={0}
+            max={form.opciones.length || undefined}
+          />
+        )}
 
         <Switch
           checked={form.resultadosVisibles}
@@ -499,22 +582,25 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           description="Apagado, la votación no muestra barras, totales ni el voto propio hasta que la cierres."
         />
 
-        {/* La vista previa es el componente real, no una maqueta. Refleja el
-            toggle de resultados: con `resultadosVisibles` va `revealBeforeVote`
-            (porcentajes a la vista); sin él, `anonymous` (ni barras ni totales).
-            No se usa `closed`: escribiría "ENCUESTA CERRADA" arriba, que en una
-            previa es información falsa sobre lo que se está creando. */}
+        {/* La vista previa es el componente real, no una maqueta: el mismo
+            `EncuestaPoll` del feed, así que la vista —video arriba, carrusel de
+            imágenes o lista— la elige él y no puede diferir de la del socio.
+            Refleja el toggle de resultados: con `resultadosVisibles` va
+            `revealBeforeVote` (porcentajes a la vista); sin él, `anonymous` (ni
+            barras ni totales). No se usa `closed`: escribiría "ENCUESTA
+            CERRADA" arriba, que en una previa es información falsa sobre lo que
+            se está creando. */}
         <div className="rounded-xl border border-border bg-surface-alt p-3">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
             Vista previa
           </p>
-          <Poll
+          <EncuestaPoll
             question={form.pregunta || "Tu pregunta acá"}
             description={form.descripcion || undefined}
             kind={form.multiple ? "multi" : "single"}
+            maxChoices={form.multiple ? form.maxOpciones || undefined : undefined}
             options={opcionesPreview}
-            layout={hayMedia ? "media" : "list"}
-            mediaSelector
+            video={videoPreview}
             revealBeforeVote={form.resultadosVisibles}
             anonymous={!form.resultadosVisibles}
           />

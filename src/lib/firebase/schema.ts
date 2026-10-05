@@ -283,16 +283,38 @@ export interface OpcionEncuestaDoc {
   id: string;
   texto: string;
   votos: number;
-  /** URL de imagen o video: la opción se vota como media, no como texto */
+  /** URL de la imagen de la opción: se vota como media y no como texto. El
+   *  video no va acá — es uno por encuesta, en `EncuestaDoc.video` */
   media?: string;
 }
 
 /** `trapnexport-encuesta/{id}`. Refleja `Encuesta`. */
 export interface EncuestaDoc {
+  /** el nombre corto del premio ("Mejor arquero"), que es lo que titula la
+   *  categoría en el feed y en la placa de la gala. Es **distinto** de la
+   *  pregunta ("¿Quién fue el mejor arquero del año?"): la placa no pregunta,
+   *  anuncia.
+   *
+   *  Vive acá y no en `PREMIOS` (`lib/trap-awards.ts`) porque antes salía de esa
+   *  lista hardcodeada cruzando por id, y renombrar una votación desde el panel
+   *  no cambiaba su título: una categoría reutilizada —la pregunta cambiada a
+   *  "¿Quién el mejor jugador de 2024?"— se seguía anunciando con el nombre del
+   *  premio viejo. Ausente = se cae al nombre de `PREMIOS`, y si tampoco está,
+   *  a la pregunta. */
+  nombre?: string;
   pregunta: string;
   descripcion?: string;
+  /** la posición en el orden en que se anuncian las categorías. Mismo motivo
+   *  que `nombre`: antes el orden salía del índice en `PREMIOS`. Ausente = se
+   *  cae a ese índice, y las que no son premios van al final por `createdAt`. */
+  orden?: number;
+  /** URL de un único video para toda la encuesta; ausente = sin video */
+  video?: string;
   opciones: OpcionEncuestaDoc[];
   multiple: boolean;
+  /** cuántas opciones se pueden elegir cuando `multiple`, y por lo tanto
+   *  cuántas ganan. Ausente o 0 = sin tope y gana una sola. */
+  maxOpciones?: number;
   resultadosVisibles: boolean;
   estado: "borrador" | "abierta" | "cerrada";
   /** "YYYY-MM-DD"; ausente = sin fecha de cierre */
@@ -366,6 +388,67 @@ export interface EventoDoc {
 export interface CronogramaConfigDoc {
   /** "YYYY-MM-DD" */
   fecha: string;
+  updatedAt: FsTimestamp;
+}
+
+/** El objetivo de la cuenta regresiva de la home, dentro de `PortadaConfigDoc`.
+ *
+ *  `origen` es lo que evita que la home tenga una fecha propia que haya que
+ *  acordarse de mover:
+ *
+ *  - `cronograma` — cuenta al día del cronograma (`trapnexport-config/cronograma`)
+ *    y a la hora del primer evento de ese día. Es el default: el dato ya lo
+ *    mantiene el panel, y mover el cronograma mueve el contador solo.
+ *  - `fija` — cuenta a `fecha`/`hora`, cargadas a mano. Para lo que no es el
+ *    evento: el lanzamiento de la app, el cierre de una votación.
+ *
+ *  `fecha` y `hora` se guardan aunque el origen sea `cronograma`: quien vuelve
+ *  a `fija` recupera lo que había cargado en vez de empezar de cero.
+ */
+export interface PortadaCountdownDoc {
+  /** en `false` la home no muestra contador */
+  activa: boolean;
+  origen: "cronograma" | "fija";
+  /** "YYYY-MM-DD" — sólo se usa con `origen: "fija"` */
+  fecha?: string;
+  /** "HH:mm" — sólo se usa con `origen: "fija"` */
+  hora?: string;
+  /** el texto chico de arriba ("Lanzamiento") */
+  eyebrow: string;
+  /** la línea de abajo; vacía se omite */
+  titulo?: string;
+  /** qué dice al llegar a cero */
+  mensajeFinal: string;
+}
+
+/** Un slide del carrusel de la home.
+ *
+ *  `src` es la `downloadURL` de Storage (`lib/storage/portada-image.ts`) o un
+ *  `data:` generado por `lib/media.ts` en los de relleno. No guarda la ruta en
+ *  el bucket: igual que las imágenes de la historia, quitar un slide deja el
+ *  archivo huérfano y se acepta. Borrar el archivo al sacar el slide obligaría
+ *  a un segundo viaje al bucket desde el navegador, y a resolver qué hacer
+ *  cuando ese borrado falla pero el documento ya se guardó.
+ */
+export interface PortadaSlideDoc {
+  src: string;
+  /** texto alternativo: es una imagen de contenido, no decorativa */
+  alt: string;
+  /** el epígrafe que el `Carousel` dibuja encima; vacío se omite */
+  caption?: string;
+}
+
+/** `trapnexport-config/portada`. La home: cuenta regresiva y carrusel.
+ *
+ *  Un documento y no una colección de slides: son cinco o seis imágenes con un
+ *  orden, y el orden es lo que más se edita. En una colección, reordenar sería
+ *  N escrituras de un campo `orden` —con la mitad del carrusel quedándose atrás
+ *  si una falla—; en un array es un solo `set`. Mismo criterio que el palmarés
+ *  en `HistoriaClubDoc.trophies`.
+ */
+export interface PortadaConfigDoc {
+  countdown: PortadaCountdownDoc;
+  slides: PortadaSlideDoc[];
   updatedAt: FsTimestamp;
 }
 

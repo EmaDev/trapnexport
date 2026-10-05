@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import {
   Card,
-  Poll,
   ProgressBar,
   TabsGlow,
   useSnackbar,
@@ -14,59 +13,42 @@ import {
 
 import { ChevronIcon } from "@/components/atoms/icons";
 import { CronogramaDia } from "@/components/organisms/CronogramaDia";
+import { EncuestaPoll } from "@/components/organisms/EncuestaPoll";
 import { useAuth } from "@/lib/auth/AuthContext";
-import type {
-  Cronograma,
-  EncuestaFeedVM,
-  NoticiaFeedVM,
-} from "@/lib/contenido/queries";
+import { imagenDeOpcion, videoDeEncuesta } from "@/lib/contenido/media";
+import type { Cronograma, EncuestaFeedVM } from "@/lib/contenido/queries";
 import { votarEncuesta } from "@/lib/contenido/voto";
-import { EDICION, PREMIOS } from "@/lib/trap-awards";
+import { EDICION } from "@/lib/trap-awards";
 
-/** Las tres solapas de contenido de campaña que van debajo del carrusel del feed.
+/** Las solapas de contenido de campaña que van debajo del carrusel del feed.
  *
  *  `TabsGlow` es **siempre controlado** (`value` + `onChange` son requeridos,
  *  no tiene modo no controlado), así que el estado del tab activo vive acá y no
  *  en `FeedClient`: es estado de este bloque, no de la pantalla.
  *
- *  Las tres solapas —premios, cronograma y noticias— salen del servidor, de las
- *  mismas colecciones de Firestore que edita `/admin`. Antes había acá tres
- *  listas hardcodeadas que contradecían al panel sin que nada avisara.
+ *  Las dos solapas —premios y cronograma— salen del servidor, de las mismas
+ *  colecciones de Firestore que edita `/admin`. Antes había acá listas
+ *  hardcodeadas que contradecían al panel sin que nada avisara.
  */
 
-/** El nombre del premio y su tope de opciones no están en el documento de la
- *  encuesta: viven en `lib/trap-awards.ts`, el mismo archivo del que se sembró
- *  la colección, y se cruzan por id —igual que hace `/admin/presentacion`—. Una
- *  encuesta cargada a mano desde el panel no está acá: cae al `pregunta` como
- *  nombre y sin tope. */
-const PREMIO_POR_ID = new Map(PREMIOS.map((p) => [p.id, p]));
+/** El título y el tope de opciones ya vienen resueltos del servidor
+ *  (`EncuestaFeedVM`), que los lee del documento. Antes se cruzaban por id
+ *  contra `PREMIOS` —una lista hardcodeada en `lib/trap-awards.ts`— y eso hacía
+ *  que renombrar una votación desde el panel no cambiara su título: una
+ *  categoría reutilizada se seguía anunciando con el nombre del premio viejo. */
+type Categoria = EncuestaFeedVM;
 
-type Categoria = EncuestaFeedVM & {
-  /** el nombre del premio, o la pregunta si no hay premio asociado */
-  nombre: string;
-  /** tope de opciones cuando es `multiple` (el once ideal son once) */
-  maxOpciones?: number;
-};
-
-/** Una URL http(s) a secas: es lo que habilita el preview de la media. */
-const esUrl = (s: string) => /^https?:\/\/\S+$/i.test(s.trim());
-/** Distingue video de imagen por la extensión de la URL. */
-const esVideo = (url: string) => /\.(mp4|webm|ogg|mov|m4v)(\?|#|$)/i.test(url.trim());
-
-/** Una opción de encuesta → `PollOption`, con la media en `image`/`video`
- *  cuando la URL es válida. Los conteos van en cero y nunca se muestran: los
+/** Una opción de encuesta → `PollOption`, con la imagen en `image` cuando la
+ *  URL es válida. El video no entra acá: es uno por encuesta y lo resuelve
+ *  `videoDeEncuesta`. Los conteos van en cero y nunca se muestran: los
  *  resultados se revelan en la gala (lo hace `anonymous` en el `Poll`). */
 const aPollOption = (o: { id: string; texto: string; media?: string }): PollOption => {
-  const media = o.media?.trim();
+  const imagen = imagenDeOpcion(o.media);
   return {
     id: o.id,
-    label: o.texto || media?.split(/[/?#]/).filter(Boolean).pop() || "Opción",
+    label: o.texto || imagen?.split(/[/?#]/).filter(Boolean).pop() || "Opción",
     votes: 0,
-    ...(media && esUrl(media)
-      ? esVideo(media)
-        ? { video: media }
-        : { image: media }
-      : {}),
+    ...(imagen ? { image: imagen } : {}),
   };
 };
 
@@ -74,10 +56,12 @@ const aPollOption = (o: { id: string; texto: string; media?: string }): PollOpti
  *
  *  Si todavía no está abierta (`proximamente`) se muestra la lista de opciones
  *  en gris, sin `Poll` — típico de los premios de video mientras no hay clips.
- *  Si está abierta, el `Poll` real con los mismos props que la vista previa del
- *  panel: `anonymous` apaga barras, porcentajes y total, y `allowChangeVote`
- *  deja volver a votar. El "Cambiar voto" violeta del pie es redundante y no
- *  tiene prop para apagarlo, así que se oculta con un selector acotado.
+ *  Si está abierta, el `EncuestaPoll` real con los mismos props que la vista
+ *  previa del panel —y es él quien elige entre el video arriba, el carrusel de
+ *  imágenes o la lista pelada—: `anonymous` apaga barras, porcentajes y total,
+ *  y `allowChangeVote` deja volver a votar. El "Cambiar voto" violeta del pie
+ *  es redundante y no tiene prop para apagarlo, así que se oculta con un
+ *  selector acotado.
  */
 function CategoriaVotacion({
   categoria,
@@ -111,18 +95,16 @@ function CategoriaVotacion({
   }
 
   const options = categoria.opciones.map(aPollOption);
-  const hayMedia = options.some((o) => o.image || o.video);
 
   return (
     <div className="[&_footer_button.text-primary]:hidden">
-      <Poll
+      <EncuestaPoll
         question={categoria.pregunta}
         description={categoria.descripcion}
         kind={categoria.multiple ? "multi" : "single"}
         maxChoices={categoria.maxOpciones}
         options={options}
-        layout={hayMedia ? "media" : "list"}
-        mediaSelector
+        video={videoDeEncuesta(categoria.video, categoria.opciones)}
         voted={voto}
         onVote={onVotar}
         anonymous
@@ -214,11 +196,9 @@ function CategoriaFila({
 export function FeedTabs({
   cronograma,
   encuestas,
-  noticias,
 }: {
   cronograma: Cronograma;
   encuestas: EncuestaFeedVM[];
-  noticias: NoticiaFeedVM[];
 }) {
   const { snack } = useSnackbar();
   const router = useRouter();
@@ -245,18 +225,8 @@ export function FeedTabs({
   const rechazar = (encuestaId: string) =>
     setRechazos((prev) => ({ ...prev, [encuestaId]: (prev[encuestaId] ?? 0) + 1 }));
 
-  const categorias: Categoria[] = useMemo(
-    () =>
-      encuestas.map((e) => {
-        const premio = PREMIO_POR_ID.get(e.id);
-        return {
-          ...e,
-          nombre: premio?.nombre ?? e.pregunta,
-          maxOpciones: e.multiple ? premio?.maxOpciones : undefined,
-        };
-      }),
-    [encuestas],
-  );
+  // El servidor ya las manda ordenadas y con el título resuelto.
+  const categorias: Categoria[] = encuestas;
 
   const votables = categorias.filter((c) => !c.proximamente);
   const total = votables.length;
@@ -318,7 +288,6 @@ export function FeedTabs({
     () => [
       { id: "encuesta", label: "Premios", badge: pending || undefined },
       { id: "cronograma", label: "Cronograma" },
-      { id: "noticias", label: "Noticias" },
     ],
     [pending],
   );
@@ -404,29 +373,6 @@ export function FeedTabs({
             />
           </Card>
         ),
-
-        noticias:
-          noticias.length === 0 ? (
-            <Card variant="outline" padding="md">
-              <p className="py-4 text-center text-sm text-muted">
-                Todavía no hay noticias publicadas.
-              </p>
-            </Card>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {noticias.map((n) => (
-                <li key={n.id}>
-                  <Card variant="outline" padding="md">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted">
-                      {n.fecha} · {n.autor}
-                    </p>
-                    <h3 className="mt-1 font-semibold">{n.titulo}</h3>
-                    <p className="mt-1 text-sm text-muted">{n.copete}</p>
-                  </Card>
-                </li>
-              ))}
-            </ul>
-          ),
       }}
     />
   );

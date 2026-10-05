@@ -12,6 +12,7 @@ import type {
   TemporadaDoc,
 } from "@/lib/firebase/schema";
 import { SEED } from "@/lib/historia/seed";
+import { avatarUrl, playerPhotoUrl } from "@/lib/media";
 import type {
   Balance,
   Clip,
@@ -252,6 +253,39 @@ const fichasDeCuentas = cache(async (): Promise<Map<string, Cuenta>> => {
   return porJugador;
 });
 
+/** La foto que **eligió** la persona dueña de la ficha, si eligió alguna.
+ *
+ *  Vale la que subió desde `/perfil` y vale la que trajo Google al entrar: las
+ *  dos son una decisión suya. Lo que no cuenta es el avatar que arma el
+ *  registro cuando no hay ninguna —`avatarUrl()`, las iniciales sobre el
+ *  degradé—, y por eso el chequeo es contra `data:`: todo lo generado acá sale
+ *  como data-URI y todo lo elegido es una URL de Storage o de Google. Es la
+ *  diferencia entre "esta es mi cara" y "todavía no puse nada".
+ *
+ *  Sirve para no tener que agregarle `avatarPath` a `Cuenta`: ese campo sólo
+ *  existe para las subidas al bucket y se perdería la foto de Google. */
+const fotoElegida = (cuenta?: Cuenta) =>
+  cuenta?.avatar && !cuenta.avatar.startsWith("data:") ? cuenta.avatar : "";
+
+/** El avatar de la ficha, en orden de quién manda.
+ *
+ *  Primero la foto que eligió la persona: si se cambió el perfil, esa es la
+ *  cara con la que quiere que la vean, y la del club es la de la pretemporada
+ *  de hace tres años. Después la institucional, y al final las iniciales
+ *  generadas — sin ese último respaldo el panel dibujaba la mitad de las filas
+ *  sin círculo y `/historia/:año` mandaba un `<img src="">`, que es el ícono de
+ *  imagen rota. */
+const avatarDe = (id: string, d: PlayerDoc, cuenta?: Cuenta) =>
+  fotoElegida(cuenta) || d.avatar || avatarUrl(d.name, id);
+
+/** La foto grande del detalle, con el mismo orden que el avatar.
+ *
+ *  La de la cuenta es cuadrada y el slot es 3:4, pero entra con `object-cover`:
+ *  recortarle los costados a la foto de perfil es mejor que mostrar la que no
+ *  se parece a la persona. */
+const fotoDe = (id: string, d: PlayerDoc, cuenta?: Cuenta) =>
+  fotoElegida(cuenta) || d.photo || playerPhotoUrl(d.name, d.number, id);
+
 const aPlayer = (id: string, d: PlayerDoc, cuenta?: Cuenta): Player => ({
   id,
   ...(cuenta ? { ficha: cuenta.ficha, handle: cuenta.handle } : {}),
@@ -264,8 +298,8 @@ const aPlayer = (id: string, d: PlayerDoc, cuenta?: Cuenta): Player => ({
   foot: d.foot,
   height: d.height,
   birthplace: d.birthplace,
-  photo: d.photo,
-  avatar: d.avatar,
+  photo: fotoDe(id, d, cuenta),
+  avatar: avatarDe(id, d, cuenta),
   bio: d.bio,
   stats: d.stats ?? [],
   skills: d.skills ?? [],
@@ -289,7 +323,18 @@ const aPlayer = (id: string, d: PlayerDoc, cuenta?: Cuenta): Player => ({
  *  arranque no es asunto suyo. */
 const conCuenta = (p: Player, cuentas: Map<string, Cuenta>): Player => {
   const c = cuentas.get(p.id);
-  return c ? { ...p, ficha: c.ficha, handle: c.handle } : p;
+  if (!c) return p;
+
+  // La foto propia también pisa a la de la semilla: que la ficha de al lado sea
+  // contenido de arranque no es motivo para mostrarle a alguien una cara que no
+  // es la que eligió.
+  const propia = fotoElegida(c);
+  return {
+    ...p,
+    ficha: c.ficha,
+    handle: c.handle,
+    ...(propia ? { photo: propia, avatar: propia } : {}),
+  };
 };
 
 export async function getPlayers(): Promise<Player[]> {

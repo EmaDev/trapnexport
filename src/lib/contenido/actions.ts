@@ -5,17 +5,20 @@ import { revalidatePath } from "next/cache";
 
 import { requireAdmin } from "@/lib/admin/auth";
 import { adminDb } from "@/lib/firebase/admin";
-import { COL, CONFIG_CRONOGRAMA } from "@/lib/firebase/collections";
+import { COL, CONFIG_CRONOGRAMA, CONFIG_PORTADA } from "@/lib/firebase/collections";
 import type {
   EncuestaDoc,
   InvitacionDoc,
   NoticiaDoc,
   OpcionEncuestaDoc,
+  PortadaConfigDoc,
 } from "@/lib/firebase/schema";
 import { invitacionCode, newId } from "@/lib/contenido/store";
 import {
   EFECTO_INVITACION,
+  MAX_SLIDES,
   PLANTILLA_INVITACION,
+  PORTADA_VACIA,
   REVELACION_INVITACION,
   type EfectoInvitacion,
   type EncuestaInput,
@@ -26,7 +29,9 @@ import {
   type InvitacionInput,
   type InvitacionMasivaInput,
   type NoticiaInput,
+  type OrigenCuentaRegresiva,
   type PlantillaInvitacion,
+  type PortadaInput,
   type ResultadoMasivo,
   type RevelacionInvitacion,
 } from "@/lib/contenido/types";
@@ -191,9 +196,9 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
   await requireAdmin();
 
   const pregunta = text(input.pregunta, 160);
-  // Una opción vale si tiene texto **o** una URL de media: un video o una
-  // imagen puede no llevar rótulo. `media` se recorta más largo porque es una
-  // URL, no una etiqueta.
+  // Una opción vale si tiene texto **o** una URL de media: una imagen puede no
+  // llevar rótulo. `media` se recorta más largo porque es una URL, no una
+  // etiqueta.
   const opciones = input.opciones
     .map((o) => ({ texto: text(o.texto, 120), media: text(o.media ?? "", 400) || undefined }))
     .filter((o) => o.texto || o.media);
@@ -205,6 +210,21 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
   const existing = prev?.exists ? (prev.data() as EncuestaDoc) : null;
   if (input.id && !existing) return null;
 
+  // Un solo video para toda la encuesta: va arriba y las opciones quedan como
+  // lista. Ver `contenido/media.ts`. No entra en `meta` porque vacío **no** es
+  // lo mismo que ausente: `sinVacios` omitiría la clave y el `update` dejaría
+  // en la base el video anterior, así que quitarlo del formulario no lo
+  // quitaría de la encuesta. Vacío se borra explícitamente más abajo.
+  const video = text(input.video ?? "", 400);
+
+  // `nombre`, `maxOpciones` y `orden` se guardan **vacíos a propósito** cuando
+  // el formulario los deja en blanco: son los campos que antes salían de
+  // `PREMIOS` cruzando por id, y omitirlos dejaría en la base el valor anterior.
+  // Borrar el nombre desde el panel tiene que borrarlo de verdad.
+  const nombre = text(input.nombre ?? "", 60);
+  const maxOpciones = Math.max(0, Math.trunc(Number(input.maxOpciones) || 0));
+  const orden = Number.isFinite(Number(input.orden)) ? Math.trunc(Number(input.orden)) : null;
+
   const meta = sinVacios({
     pregunta,
     descripcion: text(input.descripcion ?? "", 320) || undefined,
@@ -213,6 +233,15 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
     estado: input.estado,
     cierra: input.cierra || undefined,
   });
+
+  /** Los tres opcionales que se pueden **vaciar**: en el alta se omiten, en la
+   *  edición se borran con `FieldValue.delete()`. Mismo criterio que `video`. */
+  const propios = {
+    nombre: nombre || null,
+    // El tope sólo tiene sentido si se puede elegir más de una.
+    maxOpciones: input.multiple && maxOpciones > 0 ? maxOpciones : null,
+    orden,
+  };
 
   // La clave con la que se reconoce una opción entre ediciones: el texto, o la
   // URL de media cuando la opción no tiene texto.
@@ -234,10 +263,23 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
   });
 
   if (existing) {
-    await ref.update({ ...meta, opciones: nuevasOpciones });
+    await ref.update({
+      ...meta,
+      video: video || FieldValue.delete(),
+      ...Object.fromEntries(
+        Object.entries(propios).map(([k, v]) => [k, v ?? FieldValue.delete()]),
+      ),
+      opciones: nuevasOpciones,
+    });
   } else {
     await ref.set({
       ...meta,
+      ...(video ? { video } : {}),
+      ...sinVacios(
+        Object.fromEntries(
+          Object.entries(propios).map(([k, v]) => [k, v ?? undefined]),
+        ),
+      ),
       opciones: nuevasOpciones,
       createdAt: FieldValue.serverTimestamp(),
     });
@@ -569,4 +611,76 @@ export async function setFechaEvento(fecha: string): Promise<string | null> {
     await avisar(`El cronograma se movió al ${isoShort(iso)}`, "cronograma");
   }
   return iso;
+}
+
+/* ── portada de la home ──────────────────────────────────────────────────── */
+
+/** Una URL de imagen para el `src` de un `<img>`: `https://` de Storage, un
+ *  `data:image/` generado por `lib/media.ts` o una ruta de `public/`. Cualquier
+ *  otra cosa —`javascript:` a la cabeza— se descarta. Misma función que `src` en
+ *  `historia/actions.ts`, por el mismo motivo: el valor llega de un input de
+ *  texto donde se puede pegar cualquier cosa. */
+const imagen = (v: string): string => {
+  const s = v.trim();
+  if (!s) return "";
+  const ok = s.startsWith("https://") || s.startsWith("data:image/") || s.startsWith("/");
+  return ok ? s.slice(0, 2_000_000) : "";
+};
+
+const ORIGENES: readonly OrigenCuentaRegresiva[] = ["cronograma", "fija"];
+
+/** Guarda la portada de la home: cuenta regresiva y carrusel, juntos.
+ *
+ *  Un solo `set` sobre `trapnexport-config/portada` porque es un solo documento
+ *  (ver `PortadaConfigDoc`): guardar los slides y el contador por separado deja
+ *  abierto el estado en el que se guardó uno y el otro no.
+ *
+ *  Devuelve `false` sólo si el contador quedó sin a qué contar —origen `fija`
+ *  sin fecha válida—, que es el único error que el formulario no puede corregir
+ *  solo. Un slide sin imagen no es un error: se descarta, porque es la fila que
+ *  quedó recién agregada y sin cargar.
+ *
+ *  Revalida `/`: la home es un Server Component y el contador y el carrusel
+ *  salen de acá, así que sin esto el cambio no se ve hasta el próximo deploy.
+ */
+export async function savePortada(input: PortadaInput): Promise<boolean> {
+  await requireAdmin();
+
+  const c = input.countdown;
+  const origen = oneOf(c.origen, ORIGENES, PORTADA_VACIA.countdown.origen);
+  const fecha = isoDate(c.fecha ?? "");
+
+  // La fecha fija es obligatoria sólo cuando es la que se usa. Con origen
+  // `cronograma` el contador tiene a qué contar igual, así que una fecha fija
+  // vacía (o inválida) no frena el guardado: se omite el campo.
+  if (origen === "fija" && !fecha) return false;
+
+  const doc: PortadaConfigDoc = {
+    countdown: sinVacios({
+      activa: !!c.activa,
+      origen,
+      fecha: fecha ?? undefined,
+      hora: time(c.hora ?? "", PORTADA_VACIA.countdown.hora),
+      eyebrow: text(c.eyebrow, 40) || PORTADA_VACIA.countdown.eyebrow,
+      titulo: text(c.titulo, 80) || undefined,
+      mensajeFinal: text(c.mensajeFinal, 80) || PORTADA_VACIA.countdown.mensajeFinal,
+    }),
+    slides: (input.slides ?? [])
+      .map((sl) => ({
+        src: imagen(sl?.src ?? ""),
+        alt: text(sl?.alt, 120),
+        caption: text(sl?.caption, 80),
+      }))
+      // Una fila sin imagen no es un slide: es la que se agregó y no se cargó.
+      .filter((sl) => !!sl.src)
+      .slice(0, MAX_SLIDES)
+      .map((sl) => sinVacios({ src: sl.src, alt: sl.alt, caption: sl.caption || undefined })),
+    updatedAt: FieldValue.serverTimestamp() as unknown as PortadaConfigDoc["updatedAt"],
+  };
+
+  await adminDb().collection(COL.config).doc(CONFIG_PORTADA).set(doc);
+
+  revalidate("/admin/portada");
+  revalidatePath("/");
+  return true;
 }

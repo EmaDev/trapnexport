@@ -13,7 +13,8 @@
     "seed:contenido": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-contenido.mjs",
     "seed:club": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-club.mjs",
     "seed:notificaciones": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/seed-notificaciones.mjs",
-    "admin:grant": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/grant-admin.mjs"
+    "admin:grant": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/grant-admin.mjs",
+    "reset:votos": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file=.env.local scripts/reset-votos.mjs"
   },
   "dependencies": {
     "firebase": "^12.17.0",

@@ -12,17 +12,11 @@ export const SITE_URL =
 export const absoluteUrl = (path: string) =>
   `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
-/** Fecha de lanzamiento que cuenta el `CountdownHero` del feed.
+/* La fecha que cuenta el `CountdownHero` de la home **no** vive más acá.
  *
- *  Configurable por entorno para no tener que tocar código al mover la fecha.
- *  Si el valor no parsea, cae al default en vez de romper el render con un
- *  `Invalid Date` (que en el contador se ve como `NaN` en cada bloque).
- */
-const LAUNCH_FALLBACK = "2026-10-01T21:00:00-03:00";
-
-const parseLaunch = (raw: string | undefined): Date => {
-  const parsed = new Date(raw ?? LAUNCH_FALLBACK);
-  return Number.isNaN(parsed.getTime()) ? new Date(LAUNCH_FALLBACK) : parsed;
-};
-
-export const LAUNCH_DATE = parseLaunch(process.env.NEXT_PUBLIC_LAUNCH_DATE);
+ *  Era `LAUNCH_DATE`, de `NEXT_PUBLIC_LAUNCH_DATE` con un default hardcodeado,
+ *  y por eso el contador no mostraba un dato real: la variable no estaba puesta
+ *  en ningún entorno, así que todo el mundo veía el default —ya vencido— y
+ *  moverlo pedía un deploy. Ahora sale de `trapnexport-config/portada` y se
+ *  edita en `/admin/portada`; por defecto cuenta al día del cronograma. Ver
+ *  `getPortada()` en `lib/contenido/queries.ts`. */

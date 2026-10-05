@@ -28,7 +28,8 @@ export const COL = {
   invitacion: `${PREFIX}-invitacion`,
   /** eventos del cronograma. No guardan fecha: la comparten. Ver `EventoDoc`. */
   evento: `${PREFIX}-evento`,
-  /** ajustes de una sola fila del panel (hoy: el día del cronograma). */
+  /** ajustes de una sola fila del panel: el día del cronograma y la portada de
+   *  la home. Ver `CONFIG_CRONOGRAMA` y `CONFIG_PORTADA`. */
   config: `${PREFIX}-config`,
 
   /* ── la historia del club (`lib/historia/`) ─────────────────────────────── */
@@ -101,6 +102,17 @@ export const CLUB_UID = "club";
  *  Ruta completa: `trapnexport-config/cronograma`. Ver `CronogramaConfigDoc`.
  */
 export const CONFIG_CRONOGRAMA = "cronograma";
+
+/** El otro documento de `trapnexport-config`: lo que se ve al abrir la app.
+ *
+ *  La cuenta regresiva y los slides del carrusel de la home son una sola fila
+ *  que se edita junta en `/admin/portada`, igual que el día del cronograma. Van
+ *  en un documento aparte de `cronograma` —y no como dos campos más del mismo—
+ *  porque son dos cosas que se tocan en momentos distintos: el día del evento
+ *  lo mueve quien arma el programa, la portada la cambia quien comunica.
+ *  Ruta completa: `trapnexport-config/portada`. Ver `PortadaConfigDoc`.
+ */
+export const CONFIG_PORTADA = "portada";
 
 /** El único documento dentro de `trapnexport-historia`.
  *

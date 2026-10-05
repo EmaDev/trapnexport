@@ -7,6 +7,7 @@ import {
   CalendarIcon,
   ChatIcon,
   DashboardIcon,
+  ImageIcon,
   NewsIcon,
   PollIcon,
   PostsIcon,
@@ -42,6 +43,9 @@ const SECTIONS: SidebarSection[] = [
   {
     title: "Contenido",
     links: [
+      // Primera del grupo: es lo que ve todo el mundo al abrir la app, y lo
+      // único de acá que se toca sin tener nada nuevo que cargar.
+      { label: "Portada", href: "/admin/portada", icon: <ImageIcon /> },
       { label: "Noticias", href: "/admin/noticias", icon: <NewsIcon /> },
       { label: "Encuestas", href: "/admin/encuestas", icon: <PollIcon /> },
       { label: "Invitaciones", href: "/admin/invitaciones", icon: <TicketIcon /> },

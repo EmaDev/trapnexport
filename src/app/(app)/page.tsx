@@ -1,10 +1,6 @@
 import type { Metadata } from "next";
 
-import {
-  getCronograma,
-  getEncuestasFeed,
-  getNoticiasFeed,
-} from "@/lib/contenido/queries";
+import { getCronograma, getEncuestasFeed, getPortada } from "@/lib/contenido/queries";
 import { getFeed } from "@/lib/social/queries";
 import { FeedClient } from "./FeedClient";
 
@@ -16,18 +12,22 @@ export const metadata: Metadata = {
 };
 
 export default async function FeedPage() {
-  const [posts, cronograma, encuestas, noticias] = await Promise.all([
+  const [posts, cronograma, encuestas] = await Promise.all([
     getFeed(),
     getCronograma(),
     getEncuestasFeed(),
-    getNoticiasFeed(),
   ]);
+  // Después y no en el `Promise.all`: el contador de la portada puede estar
+  // atado al día del cronograma, y pasarle el que ya se leyó evita releer la
+  // colección de eventos entera para sacarle la hora de arranque.
+  const portada = await getPortada(cronograma);
+
   return (
     <FeedClient
       posts={posts}
       cronograma={cronograma}
       encuestas={encuestas}
-      noticias={noticias}
+      portada={portada}
     />
   );
 }

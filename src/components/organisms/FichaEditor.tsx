@@ -202,8 +202,8 @@ export function FichaEditor({ ficha, bio }: { ficha: PlayerFicha; bio?: string }
         filas.length === 0 && skills.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted">
             Todavía no cargaste tus datos. Tocá <strong className="font-semibold">Editar</strong>{" "}
-            para completar posición, dorsal, tus skills y el resto. Es lo que se muestra en tu
-            ficha de la historia del club.
+            para completar posición, dorsal, tus skills y el resto. Los datos salen en tu ficha
+            de la historia del club; las skills quedan acá, en tu perfil.
           </p>
         ) : (
           <>

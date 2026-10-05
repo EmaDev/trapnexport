@@ -1,21 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Card,
   Input,
-  Select,
   Spinner,
-  Tabs,
+  TabsGlow,
   Textarea,
   useSnackbar,
-  type SelectOption,
   type TabItem,
 } from "lib-kit-components";
 
 import { ShirtIcon } from "@/components/atoms/icons";
+import { PlantelPicker } from "@/components/organisms/PlantelPicker";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { completeProfile, suggestHandle } from "@/lib/auth/register";
 import { getClaimablePlayers, type ClaimablePlayerVM } from "@/lib/auth/roster";
@@ -77,15 +76,6 @@ export function CompletarPerfilClient() {
       .catch(() => setPlayers([]));
   }, []);
 
-  const playerOptions: SelectOption[] = useMemo(
-    () =>
-      (players ?? []).map((p) => ({
-        value: p.id,
-        label: p.claimed ? `${p.name} (ya registrado)` : p.name,
-        disabled: p.claimed,
-      })),
-    [players],
-  );
   const selectedPlayer = players?.find((p) => p.id === playerId) ?? null;
 
   const changeTab = (id: string) => {
@@ -142,7 +132,7 @@ export function CompletarPerfilClient() {
         Entraste como <strong>{user.email}</strong>. Elegí cómo te va a ver el resto.
       </p>
 
-      <Tabs items={TABS} value={tab} onChange={changeTab} variant="segmented" size="sm" fitted className="mt-5" />
+      <TabsGlow items={TABS} value={tab} onChange={changeTab} size="sm" className="mt-5" />
 
       <form className="mt-5 flex flex-col gap-4" onSubmit={submit}>
         {tab === "hincha" ? (
@@ -173,14 +163,7 @@ export function CompletarPerfilClient() {
                 El plantel todavía no está cargado. Completá como hincha y avisale al admin.
               </p>
             ) : (
-              <Select
-                label="Sos…"
-                placeholder={players === null ? "Cargando el plantel…" : "Elegí tu nombre"}
-                options={playerOptions}
-                value={playerId}
-                onChange={setPlayerId}
-                disabled={players === null}
-              />
+              <PlantelPicker players={players} value={playerId} onChange={setPlayerId} />
             )}
             <Textarea
               label="Contale algo al admin (opcional)"

@@ -2,11 +2,12 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CommentBox, SocialPost, useSnackbar } from "lib-kit-components";
+import { Button, CommentBox, Dropdown, Modal, SocialPost, useSnackbar } from "lib-kit-components";
 
 import {
   addComment,
   deleteComment,
+  deleteMyPost,
   toggleCommentLike,
   toggleLike,
   toggleSave,
@@ -31,6 +32,16 @@ import type { PostVM, SessionVM } from "@/lib/social/queries";
  *  Eso cumple igual la regla dura de la guía —nunca dos cajas de escritura en
  *  el mismo post— y el día que la librería se actualice, el feed puede pasar a
  *  la caja incluida sin tocar nada más que este archivo.
+ *
+ *  ⚠️ Segundo desvío, también a propósito: el menú de "⋯" es nuestro y va
+ *  encima del de la librería. `SocialPost` dibuja un `⋯` en el header que no
+ *  recibe ningún handler —es decorativo— y no expone ningún slot para las
+ *  acciones del autor. Así que el menú real se monta en el wrapper, en
+ *  `absolute` y sobre esas mismas coordenadas (`right-4 top-4`, los 32px que
+ *  deja el `px-4 pt-4` del header), que es donde la persona ya lo busca. Va en
+ *  el wrapper y no dentro del `article` porque el `article` es
+ *  `overflow-hidden`: el panel del `Dropdown` se posiciona absoluto dentro del
+ *  trigger, sin portal, y adentro quedaría recortado.
  */
 export function PostCard({
   post,
@@ -53,11 +64,41 @@ export function PostCard({
 
   const [liked, setLiked] = useState(post.liked);
   const [saved, setSaved] = useState(post.saved);
+  const [confirmando, setConfirmando] = useState(false);
+  const [borrado, setBorrado] = useState(false);
 
   const detail = mode === "detail";
+  /*  El autor y nadie más. `post.mine` ya sale del uid de la sesión, pero el
+   *  `session` se pide igual: sin cookie la acción no escribe nada y el menú
+   *  sería un botón que no hace nada. */
+  const puedeBorrar = post.mine && !!session;
+
+  const borrar = () => {
+    setConfirmando(false);
+    /*  En el feed la tarjeta se saca de la pantalla acá mismo: la Server Action
+     *  revalida y el post desaparece igual, pero recién cuando vuelve la
+     *  respuesta, y hasta entonces seguiría ahí como si el botón no hubiera
+     *  hecho nada. En el detalle no se oculta: se sale de la pantalla, que
+     *  quedaría vacía. */
+    if (detail) {
+      startTransition(async () => {
+        await deleteMyPost(post.id);
+        snack({ message: "Publicación eliminada", variant: "error" });
+        router.replace("/");
+      });
+      return;
+    }
+    setBorrado(true);
+    startTransition(async () => {
+      await deleteMyPost(post.id);
+      snack({ message: "Publicación eliminada", variant: "error" });
+    });
+  };
+
+  if (borrado) return null;
 
   return (
-    <div ref={box}>
+    <div ref={box} className="relative">
       <SocialPost
         author={post.author}
         time={post.time}
@@ -122,6 +163,59 @@ export function PostCard({
           title={detail ? "Comentarios" : `Comentarios (${post.counts.comments})`}
         />
       </SocialPost>
+
+      {puedeBorrar && (
+        <Dropdown
+          className="absolute right-4 top-4"
+          align="end"
+          items={[
+            {
+              label: "Borrar publicación",
+              destructive: true,
+              onClick: () => setConfirmando(true),
+            },
+          ]}
+          trigger={
+            <button
+              type="button"
+              aria-label="Más opciones"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-alt hover:text-foreground"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="5" cy="12" r="1.8" />
+                <circle cx="12" cy="12" r="1.8" />
+                <circle cx="19" cy="12" r="1.8" />
+              </svg>
+            </button>
+          }
+        />
+      )}
+
+      {/* Borrar se lleva los comentarios y las fotos del bucket: no hay
+          "deshacer" posible, así que no va con un snackbar de undo como los
+          comentarios, va con una confirmación. Es el mismo criterio que
+          `/admin/publicaciones`. */}
+      <Modal
+        open={confirmando}
+        onClose={() => setConfirmando(false)}
+        title="Borrar publicación"
+        description="Se eliminan también sus comentarios y sus fotos. No se puede deshacer."
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setConfirmando(false)}>
+              Cancelar
+            </Button>
+            <Button variant="danger" onClick={borrar}>
+              Borrar definitivamente
+            </Button>
+          </div>
+        }
+      >
+        <p className="line-clamp-3 text-sm text-muted">
+          {post.text || "Publicación con fotos"}
+        </p>
+      </Modal>
     </div>
   );
 }

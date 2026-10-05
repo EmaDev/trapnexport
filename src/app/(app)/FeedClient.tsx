@@ -23,10 +23,11 @@ import { registerShare } from "@/lib/social/actions";
 import type {
   Cronograma,
   EncuestaFeedVM,
-  NoticiaFeedVM,
+  PortadaVM,
 } from "@/lib/contenido/queries";
 import type { PostVM } from "@/lib/social/queries";
-import { APP_NAME, LAUNCH_DATE } from "@/lib/site";
+import { APP_NAME } from "@/lib/site";
+import { fromISODate } from "@/lib/time";
 import { useNotifications } from "./notifications-context";
 
 /** Degradé de marca para `AppHeaderCardSlot` vía `gradientClassName` (reemplaza
@@ -47,6 +48,19 @@ export const HEADER_BRAND_GRADIENT = "bg-[linear-gradient(135deg,#50108b,#752eb8
  *  cuelga de cada botón de acción, que es exactamente el badge: la card del
  *  slot es `CountdownHero` y no tiene un solo `<button>`, así que no hay otro
  *  nodo al que pueda pegarle. */
+/** Esconde la card flotante del header cuando no hay contador que poner
+ *  adentro.
+ *
+ *  `AppHeaderCardSlot` **siempre** dibuja la card: `card` sin contenido no la
+ *  omite, la deja vacía (ver el `div.px-4.pb-0` en el dist de la librería), así
+ *  que con el contador apagado quedaba una barra blanca de 32px con sombra
+ *  colgando del escudo. No hay prop para sacarla, y el `<header>` es el único
+ *  punto de entrada — igual que con los badges de abajo.
+ *
+ *  El `div` del spacer que viene después no hace falta esconderlo: su alto es
+ *  `cardOverlap`, y acá va en 0. */
+const HEADER_SIN_CARD = "[&>div.pb-0]:hidden";
+
 export const HEADER_RED_BADGES = [
   // `!` para ganarle al `bg-white` propio del componente (misma capa).
   "[&_button>span.absolute]:!bg-danger",
@@ -56,13 +70,14 @@ export const HEADER_RED_BADGES = [
   "[&_button>span.absolute]:!ring-white/40",
 ].join(" ");
 
-/** Los cinco slides del carrusel de portada.
+/** El carrusel de relleno: lo que se ve mientras nadie cargó imágenes.
  *
- *  Hoy son placeholders generados (`mediaUrl`), en el tono de la marca y sin
- *  pegarle a ningún host. Cuando existan banners de verdad, esto pasa a salir
- *  del servidor como los posts —`getHighlights()` en `queries.ts`, prop del
- *  componente— y no queda nada hardcodeado en el cliente. */
-const SLIDES: CarouselImage[] = [
+ *  Las de verdad salen del panel (`/admin/portada` → `PortadaVM.slides`) y
+ *  éstas quedan como piso: son placeholders generados (`mediaUrl`), en el tono
+ *  de la marca y sin pegarle a ningún host. Un carrusel vacío dejaría un hueco
+ *  de 16:9 entre el header y las solapas, que se lee como una imagen que no
+ *  cargó y no como una portada sin configurar. */
+const SLIDES_DEMO: CarouselImage[] = [
   { src: mediaUrl("Lanzamiento", "slide-1"), alt: "Cuenta regresiva al lanzamiento", caption: "Falta poco" },
   { src: mediaUrl("Comunidad", "slide-2"), alt: "La comunidad de Trap N Export", caption: "Sumate a la conversación" },
   { src: mediaUrl("Novedades", "slide-3"), alt: "Novedades de la semana", caption: "Lo nuevo de esta semana" },
@@ -74,12 +89,12 @@ export function FeedClient({
   posts,
   cronograma,
   encuestas,
-  noticias,
+  portada,
 }: {
   posts: PostVM[];
   cronograma: Cronograma;
   encuestas: EncuestaFeedVM[];
-  noticias: NoticiaFeedVM[];
+  portada: PortadaVM;
 }) {
   const router = useRouter();
   const { unread, open, session, unreadChats } = useNotifications();
@@ -87,13 +102,24 @@ export function FeedClient({
   const [sharing, setSharing] = useState<PostVM | null>(null);
   const { account, loading } = useAuth();
 
+  const { countdown } = portada;
+  // `caption: ""` y `caption: undefined` no son lo mismo para el `Carousel`: el
+  // string vacío le dibuja la barra del epígrafe igual, vacía sobre la imagen.
+  const slides: CarouselImage[] = portada.slides.length
+    ? portada.slides.map((s) => ({
+        src: s.src,
+        alt: s.alt,
+        caption: s.caption || undefined,
+      }))
+    : SLIDES_DEMO;
+
   return (
     <>
       {/* Degradé de marca, escudo centrado en el slot `heroLogo` y badges
           rojos alineados con el resto de la app. */}
       <AppHeaderCardSlot
         gradientClassName={HEADER_BRAND_GRADIENT}
-        className={HEADER_RED_BADGES}
+        className={countdown ? HEADER_RED_BADGES : `${HEADER_RED_BADGES} ${HEADER_SIN_CARD}`}
         // Trofeo → `/historia` (la pantalla del club).
         leading={<TrophyIcon />}
         onLeadingClick={() => router.push("/historia")}
@@ -102,8 +128,9 @@ export function FeedClient({
         heroAlign="center"
         heroLogoMaxHeight={90}
         // Achica el `pb-5` que el componente mete fijo bajo el escudo, para
-        // pegarlo a la card.
-        heroClassName="!pb-1"
+        // pegarlo a la card. Sin card no hay a qué pegarlo: ahí el padding
+        // original es el que deja al escudo respirar contra el borde del header.
+        heroClassName={countdown ? "!pb-1" : undefined}
         heroLogo={
           /* eslint-disable-next-line @next/next/no-img-element -- SVG estático */
           <img
@@ -136,15 +163,23 @@ export function FeedClient({
         // deja pegada al bloque del logo.
         cardMinHeight={32}
         cardOverlap={0}
+        // El contador sale del panel. `fromISODate` acá y no en el servidor: el
+        // objetivo viaja como día + hora ("el 12 a las 21:00"), y el instante lo
+        // tiene que resolver el reloj del navegador —el mismo contra el que el
+        // contador descuenta— y no el del server, que corre en UTC. Apagado o
+        // sin fecha, la card queda vacía y el header se cierra sobre el escudo.
         card={
-          <CountdownHero
-            until={LAUNCH_DATE}
-            variant="blocks"
-            size="xl"
-            tone="surface"
-            eyebrow="Lanzamiento"
-            expiredMessage="Ya está acá."
-          />
+          countdown && (
+            <CountdownHero
+              until={fromISODate(countdown.fecha, countdown.hora)}
+              variant="blocks"
+              size="xl"
+              tone="surface"
+              eyebrow={countdown.eyebrow}
+              title={countdown.titulo}
+              expiredMessage={countdown.mensajeFinal}
+            />
+          )
         }
       />
 
@@ -154,7 +189,7 @@ export function FeedClient({
             carrusel que avanza solo es justamente lo que esa preferencia pide
             frenar, así que se lo apagamos nosotros. */}
         <Carousel
-          images={SLIDES}
+          images={slides}
           autoplay={reduced ? undefined : 5000}
           aspect={16 / 9}
           loop
@@ -184,11 +219,10 @@ export function FeedClient({
           </Card>
         )}
 
-        {/* Encuesta, cronograma y noticias. El estado del tab activo vive
-            adentro —`TabsGlow` es siempre controlado—, así que lo único que
-            baja es el cronograma: son datos del servidor, los mismos que edita
-            el panel. */}
-        <FeedTabs cronograma={cronograma} encuestas={encuestas} noticias={noticias} />
+        {/* Encuesta y cronograma. El estado del tab activo vive adentro
+            —`TabsGlow` es siempre controlado—, así que lo único que baja es el
+            cronograma: son datos del servidor, los mismos que edita el panel. */}
+        <FeedTabs cronograma={cronograma} encuestas={encuestas} />
 
         {posts.map((post) => (
           <PostCard

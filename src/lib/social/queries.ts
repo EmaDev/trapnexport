@@ -62,6 +62,11 @@ export interface PostVM {
   counts: { likes: number; comments: number; shares: number };
   liked: boolean;
   saved: boolean;
+  /** si la publicación es de quien está mirando. Sale del uid de la sesión y no
+   *  de comparar nombres en el cliente: `AuthorVM` no lleva el uid a propósito
+   *  —la UI pública no necesita saberlo— y es lo único que habilita el menú de
+   *  borrar. El corte real igual lo hace la Server Action. */
+  mine: boolean;
   likedBy: string[];
   comments: CommentVM[];
 }
@@ -245,6 +250,7 @@ const toPostVM = (
     },
     liked: viewerId ? likedBy.includes(viewerId) : false,
     saved: guardados.has(p.id),
+    mine: viewerId === p.authorId,
     likedBy: likedBy.map((id) => dir.byId(id)?.name.split(" ")[0] ?? "Alguien").slice(0, 3),
     comments,
   };

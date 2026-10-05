@@ -11,7 +11,7 @@ import {
   usePrefersReducedMotion,
 } from "lib-kit-components";
 
-import { ShirtIcon, TrophyIcon } from "@/components/atoms/icons";
+import { TrophyIcon } from "@/components/atoms/icons";
 import { ClipRail } from "@/components/organisms/ClipCard";
 import { KindChip } from "@/components/organisms/EraTimeline";
 import { QuoteBlock } from "@/components/organisms/QuoteBlock";
@@ -25,9 +25,10 @@ import type { Player, Season } from "@/lib/historia";
  *  sigue visible: sólo la conversación de chat lo esconde, y el tab activo lo
  *  resuelve el shell por prefijo de sección (`/historia/2024` → Historia).
  *
- *  El salón de la temporada no linkea a `/u/:handle`: los jugadores del club
- *  son contenido editorial y no cuentas de la red social, así que el link
- *  correcto es a su ficha, `?jugador=` de `/historia`.
+ *  El salón de la temporada es un resumen y no una ficha: cada jugador entra
+ *  con nombre, posición y dorsal, sin el motivo ni el link a su trayectoria.
+ *  La ficha entera vive en un solo lugar, `/historia` → Los que la jugaron, y
+ *  tenerla a medias acá hacía que la temporada se leyera dos veces.
  */
 export function YearClient({
   season,
@@ -171,28 +172,20 @@ export function YearClient({
           </h2>
 
           <ul className="flex flex-col gap-3">
-            {hallOfFame.map(({ player, reason }) => (
+            {hallOfFame.map(({ player }) => (
               <li key={player.id}>
                 <Card variant="outline" padding="md">
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-center gap-3">
                     {/* eslint-disable-next-line @next/next/no-img-element -- data-URI */}
                     <img src={player.avatar} alt="" className="size-11 shrink-0 rounded-full" />
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold">
+                      <p className="truncate font-semibold">
                         {player.name}{" "}
                         <span className="text-sm font-normal text-muted">
                           #{player.number}
                         </span>
                       </p>
-                      <p className="text-sm text-muted">{player.position}</p>
-                      <p className="mt-1 text-sm">{reason}</p>
-                      <Link
-                        href={`/historia?jugador=${player.id}`}
-                        className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-primary"
-                      >
-                        <ShirtIcon width={14} height={14} />
-                        Ver su trayectoria
-                      </Link>
+                      <p className="truncate text-sm text-muted">{player.position}</p>
                     </div>
                   </div>
                 </Card>

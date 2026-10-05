@@ -1,15 +1,13 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import Link from "next/link";
 import { useState } from "react";
 import {
   ActivityTimeline,
   Carousel,
   ChipCarousel,
-  ProgressBar,
   StatCard,
-  Tabs,
+  TabsGlow,
   usePrefersReducedMotion,
   type Chip,
   type TimelineEvent,
@@ -26,13 +24,17 @@ import {
   ShirtIcon,
   StarIcon,
 } from "@/components/atoms/icons";
-import type { Player, PlayerStatus } from "@/lib/historia";
+import type { Player } from "@/lib/historia";
 import { PIERNA_LABEL, POSICION_LABEL } from "@/lib/social/types";
 import { ClipRail } from "./ClipCard";
 import { QuoteBlock } from "./QuoteBlock";
 
-/** Elegí un jugador y mirá su trayectoria completa: números, skills, carrera
- *  año por año, fotos, clips y su frase.
+/** Elegí un jugador y mirá su ficha: datos, números, fotos, clips y su frase.
+ *
+ *  Las leyendas muestran además su historia entera —la bio y la trayectoria año
+ *  por año en el club—, y los del plantel no. No es una ficha a medias: al que
+ *  juega hoy se lo mira por lo que está haciendo esta temporada, y de la leyenda
+ *  lo único que queda **es** el relato de lo que hizo.
  *
  *  Es una pantalla dentro de una pantalla, y por eso el selector va arriba y
  *  fijo: con seis jugadores y ocho bloques cada uno, una grilla de fichas
@@ -42,10 +44,15 @@ import { QuoteBlock } from "./QuoteBlock";
  *
  *  De dos lados, y eso es lo que hay que tener presente al tocar este archivo:
  *  la ficha de trayectoria la carga el club en `/admin/historia`, y la ficha
- *  personal —posición, dorsal, medidas, ciudad y skills— la carga la propia
+ *  personal —posición, dorsal, medidas y ciudad— la carga la propia
  *  persona en `/perfil`, o el panel por ella (`/admin/historia` → Fichas)
  *  cuando no la completó. `queries.getPlayers()` cruza las dos por `playerId` y
  *  deja la segunda en `player.ficha`.
+ *
+ *  La foto sigue la misma regla y conviene saberlo antes de buscar el bug: si
+ *  esa persona se cambió la foto de perfil, la ficha muestra **esa** —la de la
+ *  cuenta— y no la que cargó el club. Lo resuelve `queries`, así que acá llega
+ *  en `player.photo` y `player.avatar` como si fuera una sola fuente.
  *
  *  Gana la personal, campo por campo. El motivo no es técnico: la ficha del
  *  club se escribe una vez y no se vuelve a mirar, y quien cambió de puesto o
@@ -53,10 +60,10 @@ import { QuoteBlock } from "./QuoteBlock";
  *  cae a lo que tenga cargado el club, que es como se veía esta pantalla antes.
  *
  *  Lo que sí sale de la librería: `ChipCarousel` (el selector, con avatar),
- *  `Tabs` (plantel / leyendas), `ActivityTimeline` (la carrera — acá sí es
- *  exactamente lo que hace: una entidad, eventos en orden, estado por evento),
- *  `Carousel` (las fotos, con miniaturas y zoom) y `StatCard`. Los clips y la
- *  frase son de `ClipCard` y `QuoteBlock`, que la librería no tiene.
+ *  `TabsGlow` (plantel / leyendas), `ActivityTimeline` (la carrera de la leyenda —
+ *  acá sí es exactamente lo que hace: una entidad, eventos en orden, estado por
+ *  evento), `Carousel` (las fotos, con miniaturas y zoom) y `StatCard`. Los
+ *  clips y la frase son de `ClipCard` y `QuoteBlock`, que la librería no tiene.
  */
 
 const FILTERS = [
@@ -66,11 +73,6 @@ const FILTERS = [
 ] as const;
 
 type FilterId = (typeof FILTERS)[number]["id"];
-
-const STATUS: Record<PlayerStatus, { label: string; tone: string }> = {
-  plantel: { label: "En el plantel", tone: "bg-success/10 text-success border-success/30" },
-  leyenda: { label: "Leyenda", tone: "bg-accent/10 text-accent border-accent/30" },
-};
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
@@ -126,6 +128,19 @@ export function PlayerSpotlight({
 
   if (!player) return null;
 
+  // La historia larga es sólo de las leyendas; ver el encabezado del archivo.
+  const esLeyenda = player.status === "leyenda";
+
+  const career: TimelineEvent[] = esLeyenda
+    ? player.career.map((c) => ({
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        time: c.season,
+        status: c.status,
+      }))
+    : [];
+
   /* ── lo que cargó la persona vs. lo que tiene el club ───────────────────
    *
    *  `player.ficha` es lo que esa misma persona editó en `/perfil` —o lo que
@@ -168,29 +183,13 @@ export function PlayerSpotlight({
       : { icon: <PinIcon />, label: "Nació en", value: player.birthplace },
   ].filter((d) => d.value);
 
-  /*  Las skills son lo único que no se mezcla: son una lista, no un campo, y
-   *  entreverar tres del club con dos del jugador daría una ficha que no es la
-   *  de nadie. Manda la lista de la persona cuando cargó alguna. */
-  const skills = f.skills?.length ? f.skills : player.skills;
-  const skillsPropias = Boolean(f.skills?.length);
-
-  const career: TimelineEvent[] = player.career.map((c) => ({
-    id: c.id,
-    title: c.title,
-    description: c.description,
-    time: c.season,
-    status: c.status,
-  }));
-
   return (
     <div className="flex flex-col gap-4">
-      <Tabs
+      <TabsGlow
         items={FILTERS.map((f) => ({ ...f }))}
         value={filter}
         onChange={(v) => setFilter(v as FilterId)}
-        variant="segmented"
         size="sm"
-        fitted
       />
 
       <ChipCarousel
@@ -229,35 +228,22 @@ export function PlayerSpotlight({
               </span>
             </div>
 
+            {/* La cabecera dice tres cosas y nada más: nombre, posición y
+                dorsal. El estado, el apodo y el handle salieron a propósito —
+                abajo viene la ficha entera, y repetir el perfil acá convertía
+                la presentación del jugador en una lista de etiquetas. */}
             <div className="flex min-w-0 flex-col gap-1.5">
-              <span
-                className={`w-fit rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                  STATUS[player.status].tone
-                }`}
-              >
-                {STATUS[player.status].label}
-              </span>
-
               <h3 className="text-xl font-bold leading-tight">{player.name}</h3>
               <p className="text-sm text-muted">
-                «{player.nickname}» · {puestoDe(player)}
+                {puestoDe(player)}
+                {dorsalDe(player) ? ` · #${dorsalDe(player)}` : ""}
               </p>
-
-              {/* El handle es el único lugar de la ficha que sale del módulo
-                  social: si esta persona tiene cuenta, desde su trayectoria se
-                  puede llegar a su perfil. */}
-              {player.handle && (
-                <Link
-                  href={`/u/${player.handle}`}
-                  className="w-fit text-sm font-medium text-primary hover:underline"
-                >
-                  @{player.handle}
-                </Link>
-              )}
             </div>
           </div>
 
-          <p className="text-sm leading-relaxed">{player.bio}</p>
+          {esLeyenda && player.bio && (
+            <p className="text-sm leading-relaxed">{player.bio}</p>
+          )}
 
           {/* ── datos ─────────────────────────────────────────────────────── */}
           {/* La misma grilla de tarjetas con ícono que ve la persona en su
@@ -298,48 +284,16 @@ export function PlayerSpotlight({
             </div>
           </section>
 
-          {/* ── skills ────────────────────────────────────────────────────── */}
-          {/* Vacío para las fichas en memoria: convertir a alguien que ya no
-              está en barras de "Regate 93" no es el tono que corresponde. */}
-          {skills.length > 0 && (
+          {/* ── carrera ───────────────────────────────────────────────────── */}
+          {/* El guard por largo no sobra: una leyenda recién cargada puede no
+              tener ningún paso todavía, y un título solo arriba de la nada se
+              lee como un bloque roto. */}
+          {career.length > 0 && (
             <section className="flex flex-col gap-2">
-              <div className="flex items-baseline justify-between gap-2">
-                <Label>Skills</Label>
-                {/* Quién las puso es parte del dato: "Liderazgo 94" puesto por
-                    el club y puesto por uno mismo no se leen igual. */}
-                {skillsPropias && (
-                  <span className="text-[11px] text-muted">Cargadas en su perfil</span>
-                )}
-              </div>
-              <ul className="flex flex-col gap-2.5">
-                {skills.map((s) => (
-                  <li key={s.label}>
-                    {/* El número va afuera de `ProgressBar` a propósito: su
-                        `showValue` escribe un porcentaje, y "Liderazgo 94%" no
-                        es lo que dice el dato — es un puntaje sobre 100. */}
-                    <div className="mb-1 flex items-baseline justify-between gap-2">
-                      <span className="text-[13px] font-medium">{s.label}</span>
-                      <span className="text-[13px] font-bold tabular-nums text-primary">
-                        {s.value}
-                      </span>
-                    </div>
-                    <ProgressBar
-                      value={s.value}
-                      max={100}
-                      size="sm"
-                      tone={s.value >= 90 ? "accent" : "primary"}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <Label>Trayectoria en el club</Label>
+              <ActivityTimeline events={career} />
             </section>
           )}
-
-          {/* ── carrera ───────────────────────────────────────────────────── */}
-          <section className="flex flex-col gap-2">
-            <Label>Trayectoria en el club</Label>
-            <ActivityTimeline events={career} />
-          </section>
 
           {/* ── fotos ─────────────────────────────────────────────────────── */}
           {player.gallery.length > 0 && (

@@ -2,21 +2,20 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Card,
   Input,
-  Select,
-  Tabs,
+  TabsGlow,
   Textarea,
   useSnackbar,
-  type SelectOption,
   type TabItem,
 } from "lib-kit-components";
 
 import { EyeIcon, EyeOffIcon, ShirtIcon } from "@/components/atoms/icons";
 import { GoogleSignInButton, OSeparador } from "@/components/organisms/GoogleSignInButton";
+import { PlantelPicker } from "@/components/organisms/PlantelPicker";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { claimPlayer, registerFan } from "@/lib/auth/register";
 import { getClaimablePlayers, type ClaimablePlayerVM } from "@/lib/auth/roster";
@@ -132,15 +131,6 @@ export function RegistroClient() {
       .catch(() => setPlayers([]));
   }, []);
 
-  const playerOptions: SelectOption[] = useMemo(
-    () =>
-      (players ?? []).map((p) => ({
-        value: p.id,
-        label: p.claimed ? `${p.name} (ya registrado)` : p.name,
-        disabled: p.claimed,
-      })),
-    [players],
-  );
   const selectedPlayer = players?.find((p) => p.id === playerId) ?? null;
 
   const submitHincha = async (e: React.FormEvent) => {
@@ -202,7 +192,7 @@ export function RegistroClient() {
       <h1 className="text-xl font-bold">Crear cuenta</h1>
       <p className="mt-1 text-sm text-muted">Sumate para comentar, seguir cuentas y votar.</p>
 
-      <Tabs items={TABS} value={tab} onChange={changeTab} variant="segmented" size="sm" fitted className="mt-5" />
+      <TabsGlow items={TABS} value={tab} onChange={changeTab} size="sm" className="mt-5" />
 
       {tab === "hincha" ? (
         <form className="mt-5 flex flex-col gap-4" onSubmit={submitHincha}>
@@ -253,14 +243,7 @@ export function RegistroClient() {
               El plantel todavía no está cargado. Registrate como hincha y avisale al admin.
             </p>
           ) : (
-            <Select
-              label="Sos…"
-              placeholder={players === null ? "Cargando el plantel…" : "Elegí tu nombre"}
-              options={playerOptions}
-              value={playerId}
-              onChange={setPlayerId}
-              disabled={players === null}
-            />
+            <PlantelPicker players={players} value={playerId} onChange={setPlayerId} />
           )}
           <Textarea
             label="Contale algo al admin (opcional)"

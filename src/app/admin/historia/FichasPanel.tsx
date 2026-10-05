@@ -6,6 +6,7 @@ import { DataTable, Input, Select, useSnackbar, type Column } from "lib-kit-comp
 import { guardarFichaDeCuenta } from "@/lib/admin/acciones";
 import type { FichaCuentaRow } from "@/lib/admin/cuentas";
 import type { Player } from "@/lib/historia/types";
+import { avatarUrl } from "@/lib/media";
 import { MAX_SKILLS, type FichaInput } from "@/lib/social/ficha";
 import { PIERNA_LABEL, POSICION_LABEL, type FichaSkill } from "@/lib/social/types";
 import { EstadoPill, FormModal, RowMenu } from "../Dialogs";
@@ -168,10 +169,14 @@ export function FichasPanel({
       width: "3fr",
       render: (c) => (
         <div className="flex min-w-0 items-center gap-3">
-          {c.avatar && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={c.avatar} alt="" className="size-9 shrink-0 rounded-full object-cover" />
-          )}
+          {/* Mismo criterio que la solapa Jugadores: una cuenta sin foto cae a
+              las iniciales y no a una celda vacía. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={c.avatar || avatarUrl(c.name, c.uid)}
+            alt=""
+            className="size-9 shrink-0 rounded-full object-cover"
+          />
           <div className="min-w-0">
             <p className="truncate font-medium">{c.name}</p>
             <p className="truncate text-xs text-muted">@{c.handle}</p>

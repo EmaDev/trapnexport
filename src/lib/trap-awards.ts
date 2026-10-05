@@ -104,15 +104,6 @@ const CLIPS_PENDIENTES = 3;
 
 export const PREMIOS: Premio[] = [
   {
-    id: "once-ideal",
-    nombre: "Once ideal",
-    pregunta: "¿Quiénes entran en el once ideal de la temporada?",
-    descripcion: "Elegí once. El equipo se arma con los más votados.",
-    fuente: "plantel",
-    multiple: true,
-    maxOpciones: 11,
-  },
-  {
     id: "revelacion",
     nombre: "Revelación",
     pregunta: "¿Quién fue la revelación del año?",
@@ -218,6 +209,27 @@ export const PREMIOS: Premio[] = [
     fuente: "plantel",
   },
 ];
+
+/** El orden de una categoría **cuando el documento no trae `orden`**: la
+ *  posición del premio en `PREMIOS`.
+ *
+ *  Es sólo el fallback para lo sembrado antes de que `orden` fuera un campo
+ *  editable del panel. Lo que manda es `EncuestaDoc.orden`; esto cubre a las
+ *  que todavía no lo tienen y deja al final —por `createdAt`— a las que no son
+ *  premios de la lista.
+ *
+ *  Ordenar por `createdAt`, que es lo que se hacía antes, dejaba las dos
+ *  pantallas atadas a un detalle de la semilla: `seed-contenido.mjs` escalonaba
+ *  la fecha hacia atrás y los consumidores ordenaban ascendente, así que las
+ *  categorías salían exactamente al revés del orden en que se anuncian. */
+const ORDEN_PREMIO = new Map(PREMIOS.map((p, i) => [p.id, i]));
+
+export const ordenDePremio = (id: string): number => ORDEN_PREMIO.get(id) ?? PREMIOS.length;
+
+/** El nombre y el tope de un premio sembrado, para las encuestas que todavía no
+ *  tienen `nombre`/`maxOpciones` propios en el documento. Nada nuevo debería
+ *  depender de esto: lo que se carga desde el panel ya los trae. */
+export const premioPorId = (id: string): Premio | undefined => PREMIOS.find((p) => p.id === id);
 
 /** Los premios que se votan sobre video: mejor gol, mejor caño y mejor
  *  asistencia. Son los únicos sin datos reales todavía —las opciones que

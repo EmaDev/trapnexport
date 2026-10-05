@@ -16,6 +16,12 @@ import { subirImagenHistoria } from "@/lib/storage/historia-image";
  *
  *  El equivalente para el resto del panel es `admin/Dialogs.tsx`, que aporta
  *  el modal y la confirmación de borrado. Esto es la capa de adentro.
+ *
+ *  `/admin/portada` también los usa (el carrusel de la home es una lista de
+ *  imágenes con epígrafe, exactamente la forma del museo). Vive acá y no en una
+ *  carpeta común porque la historia sigue siendo quien lo usa siete veces; si
+ *  aparece una tercera pantalla, el archivo se muda a `admin/` y sólo cambian
+ *  los imports.
  */
 
 /* ── imagen ──────────────────────────────────────────────────────────────── */
@@ -41,6 +47,7 @@ export function ImageField({
   value,
   onChange,
   aspect = "16 / 9",
+  subir = subirImagenHistoria,
 }: {
   label: string;
   hint?: string;
@@ -48,6 +55,11 @@ export function ImageField({
   onChange: (src: string) => void;
   /** proporción de la miniatura: cuadrada para retratos y escudos */
   aspect?: string;
+  /** a qué carpeta del bucket va el archivo. El default es la de la historia
+   *  del club, que es quien lo usa en siete solapas; la portada de la home pasa
+   *  `subirImagenPortada` porque sus imágenes se reemplazan seguido y van
+   *  separadas (ver `lib/storage/portada-image.ts`). */
+  subir?: (file: File) => Promise<{ src: string }>;
 }) {
   const { snack } = useSnackbar();
   const input = useRef<HTMLInputElement>(null);
@@ -60,7 +72,7 @@ export function ImageField({
     if (!file) return;
     setSubiendo(true);
     try {
-      const { src } = await subirImagenHistoria(file);
+      const { src } = await subir(file);
       onChange(src);
       snack({ message: "Imagen subida", variant: "success" });
     } catch (e) {

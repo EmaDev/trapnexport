@@ -24,7 +24,6 @@ import {
   StarIcon,
   TrophyIcon,
 } from "@/components/atoms/icons";
-import { ClipRail } from "@/components/organisms/ClipCard";
 import { EraTimeline } from "@/components/organisms/EraTimeline";
 import { PalmaresRail } from "@/components/organisms/PalmaresRail";
 import { PlayerSpotlight } from "@/components/organisms/PlayerSpotlight";
@@ -36,18 +35,17 @@ import { useNotifications } from "../notifications-context";
 
 /** La historia del club, en una sola pantalla larga.
  *
- *  Seis secciones, en el orden en que se cuenta una historia y no en el orden
+ *  Cinco secciones, en el orden en que se cuenta una historia y no en el orden
  *  en que están los datos:
  *
  *    hero          quién es el club: escudo, números, palmarés
  *    trayectoria   la línea de tiempo, 1998 → hoy  (`EraTimeline`)
  *    temporadas    las últimas cinco, cada una con su página  (`/historia/:año`)
  *    museo         fotos del archivo  (`Carousel` con miniaturas y zoom)
- *    video         clips  (`ClipRail`)
  *    frases        las citas  (`QuoteBlock`)
  *    jugadores     elegir uno y ver todo  (`PlayerSpotlight`)
  *
- *  Es scroll y no `Tabs` a propósito: una trayectoria se lee de corrido, y con
+ *  Es scroll y no `TabsGlow` a propósito: una trayectoria se lee de corrido, y con
  *  pestañas cada etapa queda escondida detrás de un tab que hay que adivinar.
  *  Lo que sí hay es una fila de chips arriba que salta a cada sección, porque
  *  scrollear siete pantallas para volver a los jugadores no es leer, es buscar.
@@ -120,14 +118,12 @@ const SECTIONS: Chip[] = [
   { id: "trayectoria", label: "Trayectoria" },
   { id: "temporadas", label: "Temporadas" },
   { id: "museo", label: "Museo" },
-  { id: "video", label: "Video" },
   { id: "frases", label: "Frases" },
   { id: "jugadores", label: "Jugadores" },
 ];
 
 export function HistoriaClient({ historia }: { historia: Historia }) {
-  const { club, balance, trophies, eras, seasons, players, quotes, gallery, clips } =
-    historia;
+  const { club, balance, trophies, eras, seasons, players, quotes, gallery } = historia;
   const router = useRouter();
   const reduced = usePrefersReducedMotion();
   const { unread, open, unreadChats } = useNotifications();
@@ -387,17 +383,6 @@ export function HistoriaClient({ historia }: { historia: Historia }) {
           />
         </section>
 
-        {/* ── video ─────────────────────────────────────────────────────── */}
-        <section className="flex flex-col gap-4">
-          <SectionHeading
-            id="video"
-            icon={<BallIcon width={18} height={18} />}
-            title="Archivo en video"
-            hint="Los clips que se guardaron. En desktop, pasá el mouse para verlos moverse."
-          />
-          <ClipRail clips={clips} />
-        </section>
-
         {/* ── frases ────────────────────────────────────────────────────── */}
         <section className="flex flex-col gap-4">
           <SectionHeading
@@ -428,7 +413,7 @@ export function HistoriaClient({ historia }: { historia: Historia }) {
             id="jugadores"
             icon={<ShirtIcon width={18} height={18} />}
             title="Los que la jugaron"
-            hint={`${players.length} trayectorias. Elegí una y está entera: números, skills, carrera, fotos y clips.`}
+            hint={`${players.length} trayectorias: ficha, números, fotos y clips. En las leyendas, la historia entera.`}
           />
           <PlayerSpotlight
             players={players}

@@ -187,6 +187,40 @@ export async function registerShare(postId: string): Promise<void> {
   revalidatePublic(postId);
 }
 
+/** Borra una publicación propia.
+ *
+ *  Es la misma operación que la del panel —`borrarPost` se lleva comentarios,
+ *  contador y fotos— con otra puerta: acá el permiso no es "ser admin" sino
+ *  "ser el autor". El corte va del lado del servidor y no alcanza con esconder
+ *  el menú en la tarjeta: una Server Action es un endpoint POST, y sin esta
+ *  comparación cualquiera con una sesión abierta borraría el post de cualquiera
+ *  mandando su id.
+ *
+ *  Sale en silencio si el post no es propio, igual que `deleteComment`: llegar
+ *  acá con el id de otra persona no es algo que pase desde la app.
+ *
+ *  Revalida también el perfil público del autor y la ruta de la publicación: la
+ *  primera sigue listando el post borrado, y la segunda queda cacheada
+ *  mostrando algo que ya no existe.
+ */
+export async function deleteMyPost(postId: string): Promise<void> {
+  const uid = await getCurrentUid();
+  if (!uid) return;
+
+  const db2 = adminDb();
+  const snap = await db2.collection(COL.post).doc(postId).get();
+  const post = snap.data() as PostDoc | undefined;
+  if (!post || post.authorId !== uid) return;
+
+  await borrarPost(postId);
+
+  revalidatePath(`/post/${postId}`);
+  const handle = await handleDe(uid);
+  if (handle) revalidatePath(`/u/${handle}`);
+  revalidatePath("/admin");
+  revalidatePath("/admin/publicaciones");
+}
+
 /* ── perfil propio ──────────────────────────────────────────────────── */
 
 /** Cambia la foto de perfil.
@@ -550,21 +584,23 @@ export async function setPostHidden(postId: string, hidden: boolean): Promise<vo
   revalidatePath("/admin/publicaciones");
 }
 
-/** Borra una publicación, sus comentarios y sus imágenes.
+/** Borra una publicación, sus comentarios y sus imágenes. **No controla
+ *  permisos**: eso lo hace quien la llama —`deletePost` pide admin,
+ *  `deleteMyPost` pide ser el autor—, y está acá adentro una sola vez porque
+ *  borrar bien son cuatro escrituras en dos sistemas y duplicarlas era la forma
+ *  de que un día el borrado del usuario se olvide de las fotos o del contador.
  *
- *  Las imágenes son lo nuevo: `PostMediaDoc.path` existía desde que el
- *  compositor sube a Storage y no lo usaba nadie, así que cada publicación
- *  borrada dejaba sus fotos en el bucket para siempre. Se borran con el Admin
- *  SDK y no desde el navegador porque quien aprieta el botón es el panel, que no
- *  es el dueño de los archivos.
+ *  Las imágenes: `PostMediaDoc.path` existía desde que el compositor sube a
+ *  Storage y no lo usaba nadie, así que cada publicación borrada dejaba sus
+ *  fotos en el bucket para siempre. Se borran con el Admin SDK y no desde el
+ *  navegador: `storage.rules` deja borrar sólo al dueño de la carpeta, y el
+ *  panel modera publicaciones que no son suyas.
  *
  *  El orden importa: primero los documentos, después los archivos. Al revés, un
  *  fallo en el medio dejaría una publicación viva apuntando a fotos que ya no
  *  existen — un post roto es peor que un archivo huérfano.
  */
-export async function deletePost(postId: string): Promise<void> {
-  await requireAdmin();
-
+async function borrarPost(postId: string): Promise<void> {
   const db2 = adminDb();
   const postRef = db2.collection(COL.post).doc(postId);
 
@@ -589,6 +625,13 @@ export async function deletePost(postId: string): Promise<void> {
   );
 
   revalidatePublic();
+}
+
+export async function deletePost(postId: string): Promise<void> {
+  await requireAdmin();
+
+  await borrarPost(postId);
+
   revalidatePath("/admin");
   revalidatePath("/admin/publicaciones");
 }

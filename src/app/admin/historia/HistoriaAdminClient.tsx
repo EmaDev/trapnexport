@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Button, Tabs, useSnackbar, type TabItem } from "lib-kit-components";
+import { Button, TabsGlow, useSnackbar, type TabItem } from "lib-kit-components";
 
 import type { FichaCuentaRow } from "@/lib/admin/cuentas";
 import { importarSemilla } from "@/lib/historia/actions";
@@ -17,7 +17,7 @@ import { TemporadasPanel } from "./TemporadasPanel";
 /** El panel de la historia del club: las secciones de `/historia`, cada una
  *  editable en su solapa.
  *
- *  Es la única pantalla del panel con `Tabs` en vez de una entrada propia en el
+ *  Es la única pantalla del panel con `TabsGlow` en vez de una entrada propia en el
  *  `SideBar` por sección, y el motivo es que todas son **una** pantalla
  *  pública. Editar una temporada casi siempre implica mirar los jugadores (el
  *  salón de la fama los referencia por id) y las etapas (la temporada 2026 y la
@@ -128,12 +128,10 @@ export function HistoriaAdminClient({
         </div>
       )}
 
-      <Tabs
+      <TabsGlow
         items={TABS}
         value={seccion}
         onChange={setSeccion}
-        variant="segmented"
-        scrollable
         panels={{
           club: <ClubPanel inicial={club} />,
           etapas: <EtapasPanel eras={historia.eras} />,
