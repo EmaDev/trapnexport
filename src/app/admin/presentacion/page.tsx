@@ -1,5 +1,5 @@
 import { requireAdmin } from "@/lib/admin/auth";
-import { getEncuestas, porOrden } from "@/lib/contenido/queries";
+import { getEncuestas } from "@/lib/contenido/queries";
 import type { CategoriaVotacion } from "@/lib/presentacion/guion";
 import { PageHeading } from "../PageHeading";
 import { PresentacionClient } from "./PresentacionClient";
@@ -26,10 +26,10 @@ export default async function PresentacionPage() {
   // documento, que es lo que edita el panel, y ya no de una lista hardcodeada.
   const categorias: CategoriaVotacion[] = (await getEncuestas())
     .filter((e) => e.estado !== "borrador")
-    // `getEncuestas` las devuelve de la más nueva a la más vieja, que es lo que
-    // quiere la tabla del panel. La gala las quiere en el orden en que se
-    // anuncian, que es el `orden` del documento.
-    .sort(porOrden)
+    // Sin `.sort()`: `getEncuestas` ya las devuelve en el orden en que se
+    // anuncian —el mismo `porOrden` del feed—, que es el que el panel acomoda
+    // con las flechas. Reordenarlas acá de nuevo era arrastrar un criterio
+    // repetido que podía quedar desalineado con el de la tabla.
     .map((e) => ({
       id: e.id,
       // Sin nombre cargado, la pregunta es lo único que hay para la placa.

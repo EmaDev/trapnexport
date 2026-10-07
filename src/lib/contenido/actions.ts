@@ -13,9 +13,11 @@ import type {
   OpcionEncuestaDoc,
   PortadaConfigDoc,
 } from "@/lib/firebase/schema";
+import { porOrden } from "@/lib/contenido/queries";
 import { invitacionCode, newId } from "@/lib/contenido/store";
 import {
   EFECTO_INVITACION,
+  FORMATO_EVENTO,
   MAX_SLIDES,
   PLANTILLA_INVITACION,
   PORTADA_VACIA,
@@ -26,6 +28,7 @@ import {
   type EstadoInvitacion,
   type EstadoNoticia,
   type EventoInput,
+  type FormatoEvento,
   type InvitacionInput,
   type InvitacionMasivaInput,
   type NoticiaInput,
@@ -36,6 +39,7 @@ import {
   type RevelacionInvitacion,
 } from "@/lib/contenido/types";
 import { notifyAll } from "@/lib/social/notify";
+import { ordenDePremio } from "@/lib/trap-awards";
 import { fromISODate, isoShort } from "@/lib/time";
 
 /** Escrituras del contenido del club, como Server Actions.
@@ -223,7 +227,18 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
   // Borrar el nombre desde el panel tiene que borrarlo de verdad.
   const nombre = text(input.nombre ?? "", 60);
   const maxOpciones = Math.max(0, Math.trunc(Number(input.maxOpciones) || 0));
-  const orden = Number.isFinite(Number(input.orden)) ? Math.trunc(Number(input.orden)) : null;
+
+  /*  El orden. El formulario lo manda de vuelta tal como lo leyó —no se edita a
+   *  mano, se mueve con las flechas de la tabla—, así que guardar una edición
+   *  no toca el puesto. Lo que sí resuelve acá es el **alta**: una encuesta
+   *  nueva sin orden se va al final de la lista.
+   *
+   *  Sin eso caería en `ordenDePremio`, que para un id que no es uno de los
+   *  premios sembrados devuelve `PREMIOS.length`: con el orden ya normalizado
+   *  en 0..n-1 eso la mete en el medio del feed, y aparecería pisando a una
+   *  categoría que ya estaba anunciada en ese puesto. */
+  const cargado = Number.isFinite(Number(input.orden)) ? Math.trunc(Number(input.orden)) : null;
+  const orden = cargado ?? (input.id ? null : await proximoOrden());
 
   const meta = sinVacios({
     pregunta,
@@ -294,6 +309,77 @@ export async function saveEncuesta(input: EncuestaInput): Promise<string | null>
   revalidate("/admin/encuestas");
   if (seAbre) await avisar(`Nueva votación: ${pregunta}`, "encuesta", meta.descripcion);
   return ref.id;
+}
+
+/** Las encuestas con lo justo para ordenarlas, ya en el orden del feed.
+ *
+ *  `select()` y no `get()`: para acomodar la lista alcanzan las dos claves del
+ *  criterio, y bajarse las opciones de cada categoría —con sus URLs de media—
+ *  para después descartarlas sería leer la colección entera de gusto.
+ *
+ *  Sin `orderBy("orden")`, por lo mismo que `getEncuestas`: la query saltearía
+ *  los documentos que todavía no tienen el campo, que son justo los que hay que
+ *  acomodar. El orden lo pone `porOrden` en memoria, que es el del feed. */
+const encuestasEnOrden = async () => {
+  const snap = await adminDb().collection(COL.encuesta).select("orden", "createdAt").get();
+
+  return snap.docs
+    .map((d) => ({
+      ref: d.ref,
+      id: d.id,
+      orden: typeof d.get("orden") === "number" ? (d.get("orden") as number) : undefined,
+      createdAt: d.get("createdAt") instanceof Timestamp ? d.get("createdAt").toMillis() : 0,
+    }))
+    .sort(porOrden);
+};
+
+/** El puesto que le toca a una encuesta nueva: uno más que el de la última.
+ *
+ *  Uno más que el **máximo** y no la cantidad de encuestas: la lista puede
+ *  tener huecos —borrar una categoría deja el orden en 0, 1, 3— y puestos que
+ *  todavía salen de `PREMIOS` y no del documento, los dos casos en los que
+ *  contar filas devuelve un número que ya está ocupado y mete la encuesta
+ *  nueva en el medio del feed. Como la lista viene ordenada, el máximo es el
+ *  puesto efectivo de la última. */
+const proximoOrden = async () => {
+  const todas = await encuestasEnOrden();
+  const ultima = todas.at(-1);
+  return ultima ? (ultima.orden ?? ordenDePremio(ultima.id)) + 1 : 0;
+};
+
+/** Mueve una encuesta un lugar en el orden con el que se la ve: el del feed y
+ *  el de la gala. Es el único lugar que escribe `orden`.
+ *
+ *  Reescribe el orden **entero**, y no sólo las dos filas que se cruzan como
+ *  hace `moverEra`. Allá las etapas son siempre una permutación de 0..n-1, acá
+ *  no: las categorías sembradas antes de que `orden` fuera un campo lo tienen
+ *  vacío y caen al puesto que tienen en `PREMIOS`. Intercambiar dos números
+ *  sobre esa mezcla deja empates —dos encuestas con el mismo puesto, desempate
+ *  por fecha de alta— y la fila vuelve sola a donde estaba al siguiente click.
+ *  Normalizar en cada movida hace que a partir del primero el orden sea
+ *  explícito y no dependa más de lo sembrado. Son una decena de documentos y
+ *  el batch sólo escribe los que cambian de puesto.
+ *
+ *  Revalida además el feed: es la superficie donde se ve el cambio, y es lo
+ *  único que mueve esta acción —no hay snack ni refresh del lado del socio. */
+export async function moverEncuesta(id: string, direccion: "sube" | "baja"): Promise<void> {
+  await requireAdmin();
+
+  const todas = await encuestasEnOrden();
+  const i = todas.findIndex((e) => e.id === id);
+  const j = direccion === "sube" ? i - 1 : i + 1;
+  if (i < 0 || j < 0 || j >= todas.length) return;
+
+  [todas[i], todas[j]] = [todas[j], todas[i]];
+
+  const batch = adminDb().batch();
+  todas.forEach((e, puesto) => {
+    if (e.orden !== puesto) batch.update(e.ref, { orden: puesto });
+  });
+  await batch.commit();
+
+  revalidate("/admin/encuestas");
+  revalidatePath("/");
 }
 
 export async function setEncuestaEstado(
@@ -528,6 +614,8 @@ export async function deleteInvitacion(id: string): Promise<void> {
 
 /* ── cronograma ──────────────────────────────────────────────────────────── */
 
+const FORMATOS = Object.keys(FORMATO_EVENTO) as FormatoEvento[];
+
 export async function saveEvento(input: EventoInput): Promise<string | null> {
   await requireAdmin();
 
@@ -539,13 +627,18 @@ export async function saveEvento(input: EventoInput): Promise<string | null> {
 
   const data = {
     nombre,
-    descripcion: text(input.descripcion, 600),
+    // 1200 y no 600: con formato de ítems la descripción deja de ser una frase
+    // y pasa a ser el programa del bloque —"recepción / brindis / palabras /
+    // cena"—, y doce renglones no entran en 600 caracteres. Los saltos de línea
+    // sobreviven: `text` sólo recorta puntas, y son lo que separa los ítems.
+    descripcion: text(input.descripcion, 1200),
     hora: time(input.hora, "20:00"),
     // Un evento de duración 0 o negativa se dibuja como un bloque vacío en la
     // línea de tiempo; 15 minutos es el piso razonable de algo que pasa.
     duracion: Math.min(Math.max(Math.round(input.duracion) || 90, 15), 1440),
     lugar: text(input.lugar, 120),
     tipo: input.tipo,
+    formato: oneOf(input.formato ?? "auto", FORMATOS, "auto"),
   };
 
   const col = adminDb().collection(COL.evento);

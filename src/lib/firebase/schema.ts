@@ -378,6 +378,9 @@ export interface EventoDoc {
   duracion: number;
   lugar: string;
   tipo: "partido" | "entrenamiento" | "institucional" | "social";
+  /** cómo se dibuja la descripción. Ausente en los eventos cargados antes de
+   *  que el campo existiera, y ahí vale "auto". Ver `FormatoEvento`. */
+  formato?: "auto" | "parrafo" | "items";
   createdAt: FsTimestamp;
 }
 

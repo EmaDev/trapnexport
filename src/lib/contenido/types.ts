@@ -161,6 +161,78 @@ export interface Invitacion {
 /** El tipo define el color del evento en la línea de tiempo. */
 export type TipoEvento = "partido" | "entrenamiento" | "institucional" | "social";
 
+/** Cómo se dibuja la **descripción** del evento en el cronograma.
+ *
+ *  Un bloque del día puede ser una frase ("se abren las puertas") o un
+ *  programa entero ("recepción, brindis, palabras del presidente, cena"). Con
+ *  un único render los dos se ven mal: la frase larga se corta en dos líneas
+ *  sin decir dónde sigue, y la enumeración queda como un bloque de texto
+ *  corrido donde hay que buscar las comas para saber qué pasa primero.
+ *
+ *  Es un campo del evento y no una decisión de la vista porque el que lo carga
+ *  es el único que sabe si lo que escribió es un párrafo o una lista. El feed y
+ *  el panel lo leen igual: el formato viaja con el dato.
+ *
+ *  - `auto`    — decide por el contenido: con saltos de línea o texto largo va
+ *                como ítems, y si es corto como párrafo. Es el default, y lo
+ *                que heredan los eventos cargados antes de que esto existiera.
+ *  - `parrafo` — siempre párrafo, recortado a tres líneas.
+ *  - `items`   — siempre lista: cada línea de la descripción es un ítem.
+ */
+export type FormatoEvento = "auto" | "parrafo" | "items";
+
+export const FORMATO_EVENTO: Record<FormatoEvento, { label: string; hint: string }> = {
+  auto: {
+    label: "Automático",
+    hint: "Lista si la descripción es larga o tiene varias líneas; párrafo si es corta.",
+  },
+  parrafo: {
+    label: "Párrafo",
+    hint: "Un bloque de texto, recortado a tres líneas.",
+  },
+  items: {
+    label: "Lista de ítems",
+    hint: "Cada línea de la descripción es un ítem. Los guiones del principio se sacan solos.",
+  },
+};
+
+/** La descripción partida en ítems: una línea, un ítem.
+ *
+ *  Acepta las tres formas en que alguien escribe una lista en un textarea
+ *  —`- item`, `• item`, `* item` o la línea pelada— y las normaliza a texto sin
+ *  viñeta, porque la viñeta la dibuja el componente. Las líneas vacías se caen:
+ *  separar los ítems con un renglón de más es un hábito de escritura, no un
+ *  ítem vacío en el programa del día.
+ */
+export const itemsDeDescripcion = (descripcion: string): string[] =>
+  descripcion
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^\s*[-–—•*·]\s*/, "").trim())
+    .filter(Boolean);
+
+/** A partir de cuántos caracteres `auto` considera que una descripción es
+ *  larga. Es el ancho aproximado de dos líneas en la columna del feed: por
+ *  debajo, el párrafo entra completo y la lista de un solo ítem sería ruido. */
+const LARGO_AUTO = 140;
+
+/** El formato con el que **se dibuja** la descripción: `auto` ya resuelto.
+ *
+ *  Vive acá y no en el componente para que el panel y el feed no puedan
+ *  discrepar sobre lo mismo, y para que el formulario pueda mostrar de antemano
+ *  en qué va a quedar lo que el admin está escribiendo.
+ */
+export const formatoDescripcion = (
+  evento: { descripcion: string; formato?: FormatoEvento },
+): "parrafo" | "items" => {
+  const formato = evento.formato ?? "auto";
+  if (formato !== "auto") return formato;
+
+  const items = itemsDeDescripcion(evento.descripcion);
+  return items.length > 1 || evento.descripcion.trim().length > LARGO_AUTO
+    ? "items"
+    : "parrafo";
+};
+
 /** Un bloque del cronograma.
  *
  *  **No tiene fecha.** El cronograma entero ocurre un único día —el que guarda
@@ -181,6 +253,9 @@ export interface Evento {
   duracion: number;
   lugar: string;
   tipo: TipoEvento;
+  /** cómo se dibuja `descripcion`. Opcional: los eventos cargados antes de que
+   *  existiera el campo valen como `auto`. Ver `FormatoEvento`. */
+  formato?: FormatoEvento;
   createdAt: number;
 }
 

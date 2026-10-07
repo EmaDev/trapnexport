@@ -17,7 +17,12 @@ import {
 import { ChevronIcon, CloseIcon, PlusIcon } from "@/components/atoms/icons";
 import { EncuestaPoll } from "@/components/organisms/EncuestaPoll";
 import { VideoEncuesta } from "@/components/organisms/VideoEncuesta";
-import { deleteEncuesta, saveEncuesta, setEncuestaEstado } from "@/lib/contenido/actions";
+import {
+  deleteEncuesta,
+  moverEncuesta,
+  saveEncuesta,
+  setEncuestaEstado,
+} from "@/lib/contenido/actions";
 import { esUrl, esVideo, imagenDeOpcion, videoDeEncuesta } from "@/lib/contenido/media";
 import type { EncuestaRow } from "@/lib/contenido/queries";
 import { ESTADO_ENCUESTA, type EncuestaInput, type OpcionInput } from "@/lib/contenido/types";
@@ -45,6 +50,12 @@ import { ConfirmDialog, EstadoPill, FormModal, RowMenu } from "../Dialogs";
  *  3 · La vista previa es el mismo `EncuestaPoll` que ve el socio, en modo
  *      resultados. Es la única forma de ver antes de publicar si la pregunta y
  *      las opciones entran, que es el error más común al cargar una encuesta.
+ *
+ *  4 · La tabla **está en el orden del feed** y no por fecha de alta: es la
+ *      lista que se reacomoda con "Subir" y "Bajar" del menú de la fila, así
+ *      que la fila tiene que estar en el puesto en el que el socio la ve. Por
+ *      eso la primera columna es el puesto y no hay un campo "orden" en el
+ *      formulario: se mueve donde se ve. Ver `moverEncuesta`.
  */
 
 const VACIA: EncuestaInput = {
@@ -183,6 +194,14 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
     });
   };
 
+  /** Subir o bajar un puesto. No hay snack: el movimiento se ve en la tabla,
+   *  que es la respuesta. `moverEncuesta` renumera todo el orden del lado del
+   *  servidor y el `revalidatePath` del panel repinta la lista ya acomodada. */
+  const mover = (row: EncuestaRow, direccion: "sube" | "baja") =>
+    startTransition(async () => {
+      await moverEncuesta(row.id, direccion);
+    });
+
   const cambiarEstado = (row: EncuestaRow) => {
     // Ciclo de vida de una sola vía: borrador → abierta → cerrada. Reabrir una
     // encuesta cerrada dejaría entrar votos después del corte que ya se
@@ -208,6 +227,16 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
   };
 
   const columns: Column<EncuestaRow>[] = [
+    {
+      // El puesto en el feed. Es la posición en la lista —1, 2, 3…— y no el
+      // campo `orden` del documento, que puede venir vacío: lo que importa es
+      // en qué lugar la ve el socio.
+      key: "posicion",
+      header: "#",
+      width: "48px",
+      align: "right",
+      render: (row) => <span className="tabular-nums text-muted">{row.posicion}</span>,
+    },
     {
       key: "pregunta",
       header: "Pregunta",
@@ -265,7 +294,7 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
         pageSize={10}
         density="comfortable"
         stickyHeader
-        caption="Encuestas del club"
+        caption="Encuestas del club, en el orden en que se ven en el feed"
         toolbar={<Button onClick={openNew}>Nueva encuesta</Button>}
         emptyState={
           <div className="py-8 text-center">
@@ -279,6 +308,21 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           <RowMenu
             items={[
               { label: "Editar", onClick: () => openEdit(row) },
+              // El orden se cambia acá y no con un número en el formulario:
+              // mover una fila es la operación de todos los días y abrir un
+              // modal para escribir un puesto obliga a saber de memoria el de
+              // la vecina. Deshabilitados en las puntas en vez de ocultos, por
+              // lo mismo que "Votación cerrada": el menú no cambia de alto.
+              {
+                label: "Subir en el feed",
+                disabled: row.posicion <= 1,
+                onClick: () => mover(row, "sube"),
+              },
+              {
+                label: "Bajar en el feed",
+                disabled: row.posicion >= encuestas.length,
+                onClick: () => mover(row, "baja"),
+              },
               // Desde "cerrada" no hay siguiente estado: el ítem se deshabilita
               // en vez de desaparecer, así el menú no cambia de alto por fila.
               {
@@ -539,20 +583,12 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           onChange={(v) => set("estado", v as EncuestaInput["estado"])}
         />
 
-        {/* El orden en que se anuncian las categorías, en el feed y en la gala.
-            Vacío cae al orden de los premios sembrados y, si tampoco es uno de
-            esos, al final por fecha de alta. */}
-        <Input
-          label="Orden"
-          type="number"
-          hint="En qué puesto se anuncia. Vacío, va al final."
-          value={form.orden ?? ""}
-          onChange={(e) =>
-            set("orden", e.target.value === "" ? undefined : Number(e.target.value))
-          }
-          min={0}
-          placeholder="1"
-        />
+        {/* El orden no se edita acá: se mueve con "Subir"/"Bajar" en el menú de
+            la fila, sobre la tabla, que ya está en el orden del feed. `orden`
+            igual viaja en el formulario —`openEdit` lo carga y el submit lo
+            devuelve igual— porque `saveEncuesta` borra los opcionales que no
+            vienen: sin ese ida y vuelta, guardar un cambio de pregunta
+            mandaría la categoría de nuevo al final. */}
 
         <Switch
           checked={form.multiple}

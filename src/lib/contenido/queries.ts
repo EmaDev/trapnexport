@@ -79,6 +79,11 @@ export interface EncuestaRow extends Encuesta {
   creada: string;
   /** "Cierra el sáb 12 sep" o "Sin fecha de cierre" */
   cierre: string;
+  /** el puesto en el orden del feed, empezando en 1. Es una posición calculada
+   *  —el lugar que ocupa la fila en la lista ya ordenada— y no el campo
+   *  `orden` del documento: ése puede estar vacío, repetido o con huecos, y lo
+   *  que hay que mostrar en el panel es el puesto en el que el socio la ve. */
+  posicion: number;
 }
 
 const aEncuesta = (id: string, d: EncuestaDoc): Encuesta => {
@@ -116,14 +121,25 @@ const aEncuesta = (id: string, d: EncuestaDoc): Encuesta => {
   };
 };
 
+/** Lo mínimo con lo que se puede ordenar una encuesta. `Encuesta` lo cumple;
+ *  `moverEncuesta` arma objetos así leyendo **sólo** `orden` y `createdAt`, sin
+ *  bajarse las opciones de cada documento para reacomodar una lista. */
+export interface EncuestaOrdenable {
+  id: string;
+  orden?: number;
+  createdAt: number;
+}
+
 /** Cómo se ordenan las categorías en el feed y en la gala: el `orden` del
- *  documento, que es el que se edita en el panel; si no lo tiene, la posición
- *  del premio sembrado; y a igualdad, la fecha de alta.
+ *  documento, que es el que fijan las flechas del panel; si no lo tiene, la
+ *  posición del premio sembrado; y a igualdad, la fecha de alta.
  *
- *  Se exporta porque la tabla del panel ordena distinto —por fecha, la más nueva
- *  arriba— y `/admin/presentacion` consume esa misma lectura: la proyección
- *  tiene que reordenarla con este criterio, que es el de la gala. */
-export const porOrden = (a: Encuesta, b: Encuesta): number =>
+ *  Es el **único** criterio de orden de las encuestas: lo usan el feed
+ *  (`getEncuestasFeed`), la tabla del panel (`getEncuestas`), la gala
+ *  (`/admin/presentacion`) y `moverEncuesta` para saber cuál es la vecina con
+ *  la que intercambiar. Que la tabla del panel ordene igual que el feed no es
+ *  cosmético: es lo que hace que subir y bajar una fila signifique algo. */
+export const porOrden = (a: EncuestaOrdenable, b: EncuestaOrdenable): number =>
   (a.orden ?? ordenDePremio(a.id)) - (b.orden ?? ordenDePremio(b.id)) || a.createdAt - b.createdAt;
 
 const cierreLabel = (e: Encuesta): string => {
@@ -138,14 +154,19 @@ export async function getEncuestas(): Promise<EncuestaRow[]> {
   // se puede ni arreglar ni borrar. Son pocas, el costo es el mismo.
   const snap = await adminDb().collection(COL.encuesta).get();
 
+  // Por `porOrden` y no por fecha: la tabla del panel es la que se reordena con
+  // las flechas, así que tiene que mostrar exactamente la fila en el puesto en
+  // el que el socio la va a ver. Ordenada por fecha, "subir" movía una fila a
+  // un lugar que no se correspondía con nada de lo que se veía en el feed.
   return snap.docs
     .map((doc) => aEncuesta(doc.id, doc.data() as EncuestaDoc))
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .map((e) => ({
+    .sort(porOrden)
+    .map((e, i) => ({
       ...e,
       totalVotos: e.opciones.reduce((n, o) => n + o.votos, 0),
       creada: dateTime(e.createdAt),
       cierre: cierreLabel(e),
+      posicion: i + 1,
     }));
 }
 
@@ -278,6 +299,9 @@ const aEvento = (id: string, d: EventoDoc): Evento => ({
   duracion: d.duracion,
   lugar: d.lugar,
   tipo: d.tipo,
+  // Los eventos que se cargaron antes de que el formato existiera no traen el
+  // campo: "auto" decide por el contenido y queda igual que antes.
+  formato: d.formato ?? "auto",
   createdAt: millis(d.createdAt),
 });
 

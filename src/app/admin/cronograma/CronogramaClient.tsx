@@ -18,7 +18,15 @@ import {
 import { CronogramaDia } from "@/components/organisms/CronogramaDia";
 import { deleteEvento, saveEvento, setFechaEvento } from "@/lib/contenido/actions";
 import type { EventoRow } from "@/lib/contenido/queries";
-import { TIPO_EVENTO, type EventoInput, type TipoEvento } from "@/lib/contenido/types";
+import {
+  FORMATO_EVENTO,
+  formatoDescripcion,
+  itemsDeDescripcion,
+  TIPO_EVENTO,
+  type EventoInput,
+  type FormatoEvento,
+  type TipoEvento,
+} from "@/lib/contenido/types";
 import { fromISODate, horaMas, minutosDeHora } from "@/lib/time";
 import { ConfirmDialog, EstadoPill, FormModal, RowMenu } from "../Dialogs";
 
@@ -46,7 +54,16 @@ const VACIO: EventoInput = {
   duracion: 90,
   lugar: "",
   tipo: "partido",
+  formato: "auto",
 };
+
+/** El placeholder de la descripción, en tres renglones: enseña el formato de
+ *  ítems mostrándolo, que es más corto que explicarlo en un hint. */
+const PLACEHOLDER_DESCRIPCION = [
+  "Recepción de invitados",
+  "Brindis",
+  "Palabras del presidente",
+].join("\n");
 
 const toISO = (d: Date): string => {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -98,6 +115,7 @@ export function CronogramaClient({
       duracion: row.duracion,
       lugar: row.lugar,
       tipo: row.tipo,
+      formato: row.formato ?? "auto",
     });
     setOpen(true);
   };
@@ -171,7 +189,13 @@ export function CronogramaClient({
         <div className="min-w-0">
           <p className="truncate font-medium">{row.nombre}</p>
           <p className="line-clamp-1 text-xs text-muted">
-            {row.descripcion || "Sin descripción"}
+            {!row.descripcion
+              ? "Sin descripción"
+              : formatoDescripcion(row) === "items"
+                ? `${itemsDeDescripcion(row.descripcion).length} ítems · ${
+                    itemsDeDescripcion(row.descripcion)[0]
+                  }`
+                : row.descripcion}
           </p>
         </div>
       ),
@@ -217,6 +241,13 @@ export function CronogramaClient({
   ];
 
   const finForm = horaMas(form.hora, form.duracion);
+
+  /** Cómo va a quedar la descripción que se está escribiendo. El formulario lo
+   *  resuelve con la **misma** función que el cronograma —`formatoDescripcion`—
+   *  así que el aviso no puede mentir: con `auto`, el admin ve en qué cayó su
+   *  texto antes de guardar, y no después de ir a mirar el feed. */
+  const formatoForm = formatoDescripcion(form);
+  const itemsForm = itemsDeDescripcion(form.descripcion);
 
   return (
     <>
@@ -349,10 +380,34 @@ export function CronogramaClient({
           label="Descripción"
           value={form.descripcion}
           onChange={(e) => set("descripcion", e.target.value)}
-          maxLength={600}
+          maxLength={1200}
           showCount
-          rows={3}
+          rows={4}
           autoResize
+          placeholder={PLACEHOLDER_DESCRIPCION}
+          hint={
+            form.descripcion.trim()
+              ? formatoForm === "items"
+                ? `Se va a ver como lista de ${itemsForm.length} ${
+                    itemsForm.length === 1 ? "ítem" : "ítems"
+                  }: un renglón, un ítem.`
+                : "Se va a ver como un párrafo debajo del nombre."
+              : "Un renglón por ítem si querés que se lea como lista."
+          }
+        />
+
+        {/* El formato es del evento y no de la pantalla: el que carga el día es
+            el único que sabe si lo que escribió es una frase o un programa. Ver
+            `FormatoEvento`. */}
+        <Select
+          label="Formato de la descripción"
+          options={(Object.keys(FORMATO_EVENTO) as FormatoEvento[]).map((f) => ({
+            value: f,
+            label: FORMATO_EVENTO[f].label,
+          }))}
+          value={form.formato ?? "auto"}
+          onChange={(v) => set("formato", v as FormatoEvento)}
+          hint={FORMATO_EVENTO[(form.formato ?? "auto") as FormatoEvento].hint}
         />
 
         <div className="grid gap-4 sm:grid-cols-2">
