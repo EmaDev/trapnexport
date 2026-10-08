@@ -290,3 +290,37 @@ html.dark {
     animation: none;
   }
 }
+
+/* ============================
+   FOTOS DE LAS PUBLICACIONES
+   La tarjeta se adapta a la foto, no la foto a la tarjeta.
+
+   `SocialPost` de la librería dibuja la foto única dentro de un
+   `aspect-[16/10]` con `object-cover`: a una foto vertical —el formato con el
+   que saca fotos un teléfono— le come la mitad de arriba y la mitad de abajo.
+   No hay prop para cambiarlo, así que se corrige desde acá.
+
+   El selector mira el `gap-0.5` porque la grilla de media no es el único
+   `grid` que `SocialPost` cuelga directo del `article`: la barra de acciones
+   es el otro (`grid-cols-4`), y ésa tiene que quedar como está.
+
+   Sólo con UNA foto, que es cuando la clase `.post-foto-entera` la pone
+   `PostCard`: de 2 a 4 fotos el cuadrado es lo que mantiene las celdas de la
+   grilla alineadas entre sí, y ahí el recorte es la decisión correcta.
+   ============================ */
+.post-foto-entera article > .grid.gap-0\.5 > button {
+  aspect-ratio: auto;
+  display: block;
+}
+.post-foto-entera article > .grid.gap-0\.5 > button > img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  /* Tope de alto: una foto muy vertical, entera y sin límite, deja el pie del
+     post —los likes, los comentarios— fuera de la pantalla. Lo que pase del
+     tope se achica (no se recorta) y queda centrado sobre el fondo de la
+     tarjeta. */
+  max-height: min(70vh, 34rem);
+  margin-inline: auto;
+  object-fit: contain;
+}

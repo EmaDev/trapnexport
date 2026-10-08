@@ -28,8 +28,10 @@ export interface CuentaRow {
   alta: string;
   estado: "activa" | "pendiente" | "suspendida";
   verificado: boolean;
-  /** entró con Google, con contraseña, o las dos */
   rol: UserDoc["role"];
+  /** slug del jugador vinculado, si es del plantel. Lo necesita el diálogo de
+   *  "cambiar el tipo de cuenta" para abrir con el jugador actual elegido. */
+  playerId?: string;
 }
 
 /** Una solicitud de "soy este jugador del plantel", esperando revisión. */
@@ -82,6 +84,7 @@ export async function getCuentas(): Promise<CuentaRow[]> {
         estado: ESTADO[u.status] ?? "activa",
         verificado: Boolean(u.verified),
         rol: u.role,
+        playerId: u.playerId,
       };
     });
 }

@@ -97,8 +97,13 @@ export function PostCard({
 
   if (borrado) return null;
 
+  /*  Con una sola foto la tarjeta se adapta a la foto en vez de recortarla a
+   *  16:10 (ver `.post-foto-entera` en `globals.css`). Con dos o más manda la
+   *  grilla cuadrada de la librería. */
+  const fotoEntera = post.media.length === 1;
+
   return (
-    <div ref={box} className="relative">
+    <div ref={box} className={`relative${fotoEntera ? " post-foto-entera" : ""}`}>
       <SocialPost
         author={post.author}
         time={post.time}
