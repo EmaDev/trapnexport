@@ -1,4 +1,9 @@
-import type { ClaimStatus, NotificationKind, PlayerFicha } from "@/lib/social/types";
+import type {
+  ClaimStatus,
+  CommentGif,
+  NotificationKind,
+  PlayerFicha,
+} from "@/lib/social/types";
 
 /** La forma **exacta** de lo que hay guardado en Firestore.
  *
@@ -512,12 +517,25 @@ export interface CommentDoc {
   postId: string;
   /** uid de Firebase Auth de quien comentó */
   authorId: string;
+  /** puede ser `""` **si y sólo si** hay `gif`: un comentario necesita texto o
+   *  GIF, y `addComment` rechaza el que no trae ninguno de los dos. */
   text: string;
   createdAt: FsTimestamp;
   likedBy: string[];
   /** `null` = comentario raíz; un id = respuesta a ese comentario */
   parentId: string | null;
   pinned?: boolean;
+  /** el GIF de Giphy que acompaña al comentario, si eligió uno.
+   *
+   *  Uno y no un array: es una respuesta, no una publicación. Y embebido en el
+   *  comentario y no como media aparte porque no es un archivo nuestro —son
+   *  cinco campos, una URL del CDN de Giphy entre ellos; ver `CommentGif` en
+   *  `lib/social/types.ts`—.
+   *
+   *  **Ausente, no `null`, cuando no hay.** `undefined` no se puede escribir en
+   *  Firestore, así que `addComment` arma el documento con spread condicional
+   *  en vez de poner el campo siempre. */
+  gif?: CommentGif;
 }
 
 /* ── trapnexport-user/{uid}/saved/{postId} ───────────────────────────────── */

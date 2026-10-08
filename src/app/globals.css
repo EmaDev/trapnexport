@@ -324,3 +324,29 @@ html.dark {
   margin-inline: auto;
   object-fit: contain;
 }
+
+/* ============================
+   LOS LIKES DE UNA PUBLICACIÓN, TOCABLES
+   El renglón dice "Naza y 11 más"; esto avisa que los once se pueden ver.
+
+   El click lo maneja `PostCard` por delegación (el porqué está ahí). Acá va
+   sólo la pista visual, que la librería no puede dar: ese renglón son `span`s
+   de texto, no botones.
+
+   Los `span` de los likes son los dos primeros —los corazones y el número— más
+   el de los nombres, que es el único `.truncate`. Del `.ml-auto` para la
+   derecha están los comentarios y los compartidos: ésos no abren nada, así que
+   se quedan con el cursor de siempre.
+
+   La clase la pone `PostCard` y sólo cuando hay algún like: un renglón en cero
+   no tiene lista que mostrar.
+   ============================ */
+.post-likes-click article > div[class*="text-[11px]"] > :first-child,
+.post-likes-click article > div[class*="text-[11px]"] > :nth-child(2),
+.post-likes-click article > div[class*="text-[11px]"] > .truncate {
+  cursor: pointer;
+}
+.post-likes-click article > div[class*="text-[11px]"] > :nth-child(2):hover,
+.post-likes-click article > div[class*="text-[11px]"] > .truncate:hover {
+  color: var(--color-foreground);
+}

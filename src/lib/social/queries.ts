@@ -12,7 +12,12 @@ import type {
   PostDoc,
 } from "@/lib/firebase/schema";
 import { getDirectorio, type Directorio } from "@/lib/social/directorio";
-import type { GalleryItem, NotificationKind, PlayerFicha } from "@/lib/social/types";
+import type {
+  CommentGif,
+  GalleryItem,
+  NotificationKind,
+  PlayerFicha,
+} from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
 
 /** Lecturas del dominio, ya mapeadas a lo que esperan los componentes.
@@ -37,11 +42,30 @@ export interface AuthorVM {
   verified?: boolean;
 }
 
-/** Espeja el `Comment` de `CommentBox`: `at` es timestamp, no string formateado. */
+/** Una cuenta que dio like, para la lista que se abre al tocar los likes
+ *  (`components/organisms/LikesSheet.tsx`).
+ *
+ *  No es un `AuthorVM`: lleva el uid, que `AuthorVM` esconde a propósito. La
+ *  lista lo necesita para reconocer la fila de quien mira —la marca como "Vos"
+ *  y la manda a `/perfil` en vez de a `/u/{handle}`— y para usarlo de key. */
+export interface LikerVM {
+  /** uid de Firebase Auth */
+  id: string;
+  name: string;
+  /** **vacío si la cuenta ya no existe**; la fila entonces no abre ningún
+   *  perfil. Es la misma convención que usa `getAdminPosts`. */
+  handle: string;
+  avatar: string;
+}
+
+/** Espeja el `Comentario` de `Comentarios` (`components/organisms/Comentarios.tsx`),
+ *  que a su vez es el `Comment` del `CommentBox` de la librería más `gif`: `at`
+ *  es timestamp, no string formateado. */
 export interface CommentVM {
   id: string;
   author: string;
   avatar?: string;
+  /** vacío **sólo** si hay `gif`; ver `CommentDoc.text` */
   text: string;
   at: number;
   likes: number;
@@ -49,6 +73,9 @@ export interface CommentVM {
   parentId?: string | null;
   pinned?: boolean;
   authorBadge?: string;
+  /** el GIF de Giphy del comentario, si eligió uno. Viaja tal cual está
+   *  guardado: la URL es del CDN de Giphy y la sirve el navegador directo. */
+  gif?: CommentGif;
 }
 
 export interface PostVM {
@@ -67,7 +94,23 @@ export interface PostVM {
    *  —la UI pública no necesita saberlo— y es lo único que habilita el menú de
    *  borrar. El corte real igual lo hace la Server Action. */
   mine: boolean;
+  /** los nombres de pila de los tres primeros, para la línea social de
+   *  `SocialPost` — la prop `likedBy` de la librería, que muestra el primero y
+   *  cuenta el resto. Sale de `likers`; va aparte porque la librería espera un
+   *  `string[]` y no hay forma de pasarle cuentas. */
   likedBy: string[];
+  /** **todas** las cuentas que dieron like, en el orden en que lo dieron. Es lo
+   *  que muestra la hoja al tocar los likes.
+   *
+   *  Viaja con el feed en vez de pedirse al abrir la hoja porque no cuesta
+   *  ninguna lectura más: los uid ya están en el documento de la publicación
+   *  (`PostDoc.likedBy`) y los nombres salen del directorio, que la pantalla ya
+   *  trajo entero para los autores. Así la hoja abre sin esperar nada.
+   *
+   *  **Dónde deja de servir:** son unos cien bytes por like y por publicación.
+   *  Con un club es nada; el día que un posteo junte cientos de likes, esto
+   *  pasa a ser una lectura propia —paginada— que dispare la hoja al abrirse. */
+  likers: LikerVM[];
   comments: CommentVM[];
 }
 
@@ -202,6 +245,22 @@ const authorOf = (uid: string, dir: Directorio): AuthorVM => {
   };
 };
 
+/** Quien dio un like, para la lista de la hoja.
+ *
+ *  Es `authorOf` más el uid y con una diferencia que importa: si la cuenta ya
+ *  no existe el handle queda en `""` y no en `"desconocido"`. La hoja usa ese
+ *  vacío para no linkear la fila; con un handle inventado, tocarla sería un
+ *  viaje a un 404. */
+const likerOf = (uid: string, dir: Directorio): LikerVM => {
+  const u = dir.byId(uid);
+  return {
+    id: uid,
+    name: u?.name ?? "Cuenta eliminada",
+    handle: u?.handle ?? "",
+    avatar: u?.avatar ?? "",
+  };
+};
+
 const toCommentVM = (
   c: ComentarioConId,
   viewerId: string | null,
@@ -220,6 +279,7 @@ const toCommentVM = (
     parentId: c.parentId ?? null,
     pinned: c.pinned,
     authorBadge: author?.verified ? "Verificado" : undefined,
+    gif: c.gif,
   };
 };
 
@@ -232,6 +292,7 @@ const toPostVM = (
 ): PostVM => {
   const comments = comentarios.map((c) => toCommentVM(c, viewerId, dir));
   const likedBy = p.likedBy ?? [];
+  const likers = likedBy.map((uid) => likerOf(uid, dir));
 
   return {
     id: p.id,
@@ -251,7 +312,11 @@ const toPostVM = (
     liked: viewerId ? likedBy.includes(viewerId) : false,
     saved: guardados.has(p.id),
     mine: viewerId === p.authorId,
-    likedBy: likedBy.map((id) => dir.byId(id)?.name.split(" ")[0] ?? "Alguien").slice(0, 3),
+    //  "Alguien" y no el nombre de `likerOf` para las cuentas borradas: en el
+    //  renglón de la librería, "Cuenta eliminada y 11 más" se lee como si la
+    //  publicación la hubieran likeado fantasmas.
+    likedBy: likers.map((l) => (l.handle ? l.name.split(" ")[0] : "Alguien")).slice(0, 3),
+    likers,
     comments,
   };
 };

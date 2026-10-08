@@ -172,3 +172,44 @@ export type NotificationKind =
  *  forma es `NotificacionDoc` en `lib/firebase/schema.ts`. Acá queda sólo el
  *  `NotificationKind`, que lo comparten el escritor (`social/notify.ts`) y el
  *  mapper de lectura (`social/queries.ts`). */
+
+/* ── GIFs de los comentarios ─────────────────────────────────────────────── */
+
+/** Un GIF de Giphy elegido para un comentario.
+ *
+ *  **No se sube a nuestro bucket: se guarda la URL del CDN de Giphy.** Es la
+ *  diferencia con `PostMediaItem`, y es a propósito: los términos de la API de
+ *  Giphy piden servir los GIFs desde sus dominios —es como miden las vistas— y
+ *  rehostearlos sería a la vez una violación y el peor negocio posible, un
+ *  archivo de medio mega por comentario en un bucket que pagamos nosotros. La
+ *  contracara es que si Giphy baja un GIF, el comentario queda con la imagen
+ *  rota; por eso `width`/`height` viajan guardados y no se leen de la imagen:
+ *  el hueco reserva su lugar sin salto de layout.
+ *
+ *  `url` tiene que ser de un dominio de Giphy. El corte lo hace `saneaGif` en
+ *  `lib/social/giphy.ts` y corre **en el servidor**, dentro de `addComment`:
+ *  lo que llega del cliente es texto que alguien puede escribir a mano, así que
+ *  sin eso este campo sería un `<img src>` libre apuntando a cualquier lado.
+ */
+export interface CommentGif {
+  /** id del GIF en Giphy; identifica el GIF, no el comentario */
+  id: string;
+  /** la animación a mostrar: la rendición `fixed_width` (200px de ancho) */
+  url: string;
+  /** medidas de esa rendición, para reservar el alto antes de que cargue */
+  width: number;
+  height: number;
+  /** el título de Giphy; es el `alt` del `<img>`. Puede venir vacío. */
+  title: string;
+}
+
+/** Un GIF tal como lo lista el buscador (`/api/giphy` → `GifPicker`).
+ *
+ *  Es un `CommentGif` más la miniatura de la grilla: `preview` es la rendición
+ *  chica (100px) y no se guarda en el comentario, sólo se muestra mientras se
+ *  elige. Buscar trae 24 GIFs de una; con la rendición grande en la grilla eso
+ *  son varios megas para elegir uno.
+ */
+export interface GifSugerido extends CommentGif {
+  preview: string;
+}

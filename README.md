@@ -116,11 +116,12 @@ Un solo origen para los dos módulos. El panel no tiene datos propios: lee y
 escribe exactamente lo mismo que el feed.
 
 ```
-src/lib/social/types.ts       Lo que queda del modelo propio: PlayerFicha, GalleryItem, NotificationKind. Las entidades son *Doc en firebase/schema.ts.
+src/lib/social/types.ts       Lo que queda del modelo propio: PlayerFicha, GalleryItem, NotificationKind, CommentGif. Las entidades son *Doc en firebase/schema.ts.
 src/lib/social/directorio.ts  Las cuentas de trapnexport-user, cacheadas por request. Reemplazó al array de usuarios en memoria.
 src/lib/social/queries.ts     Lecturas (feed, posts, comentarios, perfiles, notificaciones), ya mapeadas a los props.
 src/lib/social/actions.ts     Escrituras como Server Actions, con el uid sacado de la cookie.
 src/lib/social/notify.ts      Alta de avisos de campanita → Firestore (trapnexport-notification).
+src/lib/social/giphy.ts       Server · la API de Giphy (buscar/tendencias) y saneaGif, el filtro del GIF que llega del cliente.
 
 src/lib/chat/queries.ts       Bandeja, encabezado y mensajes; la bandeja del club para el panel.
 src/lib/chat/actions.ts       Enviar (texto y foto), crear grupos, marcar leído y la difusión del panel.
@@ -286,7 +287,7 @@ Detalles de la guía que están respetados y son fáciles de romper después:
 
 ## Desvíos respecto de la guía
 
-**1 · La caja de comentarios del feed es un `CommentBox`, no la incluida en
+**1 · La caja de comentarios del feed va en `children`, no es la incluida en
 `SocialPost`.** La guía describe un `SocialPost` con caja propia (`comments`,
 `onAddComment`, `currentUser`, `visibleComments`). La versión de
 `lib-kit-components` instalada (`0.1.0`) **no tiene esas props**: su
@@ -298,6 +299,65 @@ Detalles de la guía que están respetados y son fáciles de romper después:
 
 Se cumple igual la regla dura de la guía —nunca dos cajas de escritura en el
 mismo post— y el día que la librería se actualice, cambia sólo ese archivo.
+
+**1b · Y esa caja es `Comentarios`, propia, porque los comentarios llevan
+GIFs.** El `CommentBox` de la librería modela un comentario como texto y nada
+más: su `Comment` no tiene imagen, su `onSubmit` es `(text, parentId)`, y es él
+—no quien lo usa— el que dibuja el compositor y cada burbuja. No hay prop, slot
+ni render prop por donde entre un GIF, ni al escribir ni al mostrar. Así que
+`src/components/organisms/Comentarios.tsx` es ese componente con dos cosas
+agregadas y nada quitado:
+
+- `Comentario` suma `gif`, y la burbuja lo dibuja debajo del texto;
+- el compositor suma el botón **GIF** y el `GifPicker`, y `onSubmit` pasa a ser
+  `(text, parentId, gif)`.
+
+Hilos, "fijado", likes, contador de caracteres, "ver N más" y el orden —fijados
+primero, después los más recientes— son los mismos y se ven igual, a propósito:
+el día que la librería sume GIFs, volver atrás es cambiar el import de
+`PostCard` y borrar el archivo. Mismo criterio que `CountdownHero` (desvío 4).
+Dos cosas sí cambian, para no tener dos verdades en la app: la hora sale de
+`relativeTime` (`src/lib/time.ts`), el mismo formato que `SocialPost.time`, y el
+avatar es el `Avatar` de `src/components/atoms`.
+
+### Los GIFs de los comentarios
+
+Un comentario es texto, un GIF, o los dos; lo único que `addComment` rechaza es
+que no venga ninguna de las dos cosas. Las piezas:
+
+| Archivo | Qué hace |
+|---|---|
+| `src/lib/social/giphy.ts` | el cliente de la API de Giphy **y** `saneaGif`, el filtro de lo que llega del cliente |
+| `src/app/api/giphy/route.ts` | el buscador del selector: `GET /api/giphy?q=…`, con sesión |
+| `src/components/organisms/GifPicker.tsx` | el panel de búsqueda y la grilla |
+| `CommentDoc.gif` (`src/lib/firebase/schema.ts`) | cómo queda guardado — ver `CommentGif` en `src/lib/social/types.ts` |
+
+Cuatro decisiones que conviene saber antes de tocar esto:
+
+- **La clave es `GIPHY_API_KEY`, sin `NEXT_PUBLIC_`.** La cuota es por clave, y
+  una variable pública viaja en el bundle: sería la clave de cualquiera. El
+  navegador le pega a `/api/giphy`; esa ruta es la única que habla con
+  `api.giphy.com`. **Si la variable falta, el selector lo dice** (503 con
+  mensaje) en vez de mostrar una grilla vacía, y el resto de los comentarios
+  funciona igual.
+- **`/api/giphy` pide sesión.** No porque los GIFs sean secretos: sin ese corte
+  es un proxy abierto a Giphy pagado con nuestra cuota. Sin sesión tampoco se
+  dibuja el botón (`allowGif={!!session}`).
+- **El GIF no se sube a nuestro bucket: se guarda la URL del CDN de Giphy** —
+  sus términos piden servirlos desde sus dominios, y rehostear medio mega por
+  comentario lo pagaríamos nosotros. Por eso `width`/`height` van guardados: el
+  hueco se reserva antes de que la imagen cargue. Y por eso `saneaGif` ata la
+  URL a un dominio `giphy.com`: sin ese corte, el campo sería un `<img src>`
+  libre en el feed, porque una Server Action es un POST que se puede llamar sin
+  pasar por la app.
+- **"Powered by GIPHY" no es decoración.** La atribución y el link al GIF en
+  giphy.com los piden sus términos (sección 5.A). Hoy es texto, que alcanza con
+  una clave de desarrollo; **para pedir la clave de producción Giphy exige el
+  logo oficial** y screenshots de dónde está puesto.
+
+El selector es un panel **en el flujo**, abajo del textarea, y no un popover: el
+`article` de `SocialPost` es `overflow-hidden` —el mismo motivo por el que el
+menú de "⋯" se monta en el wrapper— y un panel absoluto quedaría recortado.
 
 **2 · La conversación de chat usa `Chatbot variant="inline"`.** La librería no
 trae mensajería directa. `Chatbot` da el hilo, pero modela los mensajes como

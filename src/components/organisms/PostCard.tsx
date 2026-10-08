@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Button, CommentBox, Dropdown, Modal, SocialPost, useSnackbar } from "lib-kit-components";
+import { Button, Dropdown, Modal, SocialPost, useSnackbar } from "lib-kit-components";
 
+import { Comentarios } from "@/components/organisms/Comentarios";
+import { LikesSheet } from "@/components/organisms/LikesSheet";
 import {
   addComment,
   deleteComment,
@@ -12,7 +14,7 @@ import {
   toggleLike,
   toggleSave,
 } from "@/lib/social/actions";
-import type { PostVM, SessionVM } from "@/lib/social/queries";
+import type { LikerVM, PostVM, SessionVM } from "@/lib/social/queries";
 
 /** Un post con su caja de comentarios. Se usa en el feed, en el perfil y en el
  *  detalle — cambia `mode`, no el componente.
@@ -21,17 +23,22 @@ import type { PostVM, SessionVM } from "@/lib/social/queries";
  *  con caja de comentarios incluida (`comments`, `onAddComment`, `currentUser`,
  *  `visibleComments`). La versión de `lib-kit-components` instalada acá **no
  *  tiene esas props** — su `SocialPostProps` termina en `children`. Así que la
- *  caja es siempre un `CommentBox` en el slot `children`, en las dos variantes:
+ *  caja va siempre en el slot `children`, en las dos variantes:
  *
  *    mode="feed"    → compacta: 2 comentarios, sin hilos
  *    mode="detail"  → completa: hilos, borrar
  *
- *  El orden lo fija `CommentBox` (fijados primero, después recientes); ya no es
+ *  El orden lo fija la caja (fijados primero, después recientes); ya no es
  *  configurable.
  *
  *  Eso cumple igual la regla dura de la guía —nunca dos cajas de escritura en
  *  el mismo post— y el día que la librería se actualice, el feed puede pasar a
  *  la caja incluida sin tocar nada más que este archivo.
+ *
+ *  Y esa caja es `Comentarios`, nuestra, no el `CommentBox` de la librería: es
+ *  el mismo componente con GIFs de Giphy agregados, porque el de la librería
+ *  modela un comentario como texto y nada más y no deja entrar una imagen por
+ *  ninguna prop. El porqué completo está arriba de ese archivo.
  *
  *  ⚠️ Segundo desvío, también a propósito: el menú de "⋯" es nuestro y va
  *  encima del de la librería. `SocialPost` dibuja un `⋯` en el header que no
@@ -42,6 +49,13 @@ import type { PostVM, SessionVM } from "@/lib/social/queries";
  *  el wrapper y no dentro del `article` porque el `article` es
  *  `overflow-hidden`: el panel del `Dropdown` se posiciona absoluto dentro del
  *  trigger, sin portal, y adentro quedaría recortado.
+ *
+ *  ⚠️ Tercer desvío: tocar los likes abre `LikesSheet` con la lista de quiénes
+ *  los dieron. `SocialPost` dibuja ese renglón —el corazón, el número y "Naza y
+ *  11 más"— con `span`s y sin un solo handler: `likedBy` es un `string[]` de
+ *  nombres y no hay nada parecido a un `onLikes`. Así que el click se agarra
+ *  por delegación en el wrapper y se decide por la forma del DOM; el detalle
+ *  está en `abrirLikesSiEsElRenglon`.
  */
 export function PostCard({
   post,
@@ -66,12 +80,66 @@ export function PostCard({
   const [saved, setSaved] = useState(post.saved);
   const [confirmando, setConfirmando] = useState(false);
   const [borrado, setBorrado] = useState(false);
+  const [verLikes, setVerLikes] = useState(false);
+
+  /*  La lista que abre la hoja, corregida con el estado optimista del botón.
+   *
+   *  `post.likers` viene del servidor y hasta que vuelva el `revalidatePath` de
+   *  `toggleLike` no tiene el like que la persona acaba de dar —ni se le fue el
+   *  que acaba de quitar—. Sin esto, darle me gusta y abrir la lista es no
+   *  encontrarse ahí, que es exactamente lo primero que uno va a mirar.
+   *
+   *  Mientras el botón diga lo mismo que trajo el servidor no se toca nada: la
+   *  lista de allá ya es la correcta y además está en el orden real. */
+  const likers = useMemo<LikerVM[]>(() => {
+    if (!session || liked === post.liked) return post.likers;
+    if (!liked) return post.likers.filter((l) => l.id !== session.id);
+    // Al final, que es donde va: es el último like que entró.
+    return [
+      ...post.likers,
+      { id: session.id, name: session.name, handle: session.handle, avatar: session.avatar },
+    ];
+  }, [post.likers, post.liked, liked, session]);
+
+  /** Abre la hoja de likes si el click cayó en la mitad izquierda de la "línea
+   *  social" de `SocialPost`.
+   *
+   *  La línea no es nuestra y no recibe handlers, así que se la reconoce por su
+   *  forma —el mismo truco que `.post-foto-entera` en `globals.css`, que apunta
+   *  a la grilla de fotos de la librería—:
+   *
+   *    - es el único `div` hijo directo del `article` con tipografía de 11px;
+   *    - adentro, el `span` con `ml-auto` es donde arrancan los contadores de
+   *      comentarios y compartidos. Esos no son likes: un click ahí no abre
+   *      nada, y sin el corte "3 comentarios" abriría la lista de me gusta.
+   *
+   *  Si una versión nueva de la librería cambia esas clases, esto deja de
+   *  abrir la hoja y no rompe nada más: el renglón vuelve a ser el texto muerto
+   *  que era, y el botón de abajo —el que usa el teclado— sigue entrando. */
+  const abrirLikesSiEsElRenglon = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!likers.length) return;
+
+    const target = e.target as HTMLElement;
+    const linea = target.closest<HTMLElement>("article > div");
+    if (!linea?.className.includes("text-[11px]")) return;
+
+    const celdas = [...linea.children] as HTMLElement[];
+    const tocada = celdas.findIndex((c) => c.contains(target));
+    const contadores = celdas.findIndex((c) => c.className.includes("ml-auto"));
+    if (tocada === -1 || (contadores !== -1 && tocada >= contadores)) return;
+
+    setVerLikes(true);
+  };
 
   const detail = mode === "detail";
   /*  El autor y nadie más. `post.mine` ya sale del uid de la sesión, pero el
    *  `session` se pide igual: sin cookie la acción no escribe nada y el menú
    *  sería un botón que no hace nada. */
   const puedeBorrar = post.mine && !!session;
+
+  /** A iniciar sesión, y de vuelta a este post. Lo usan las dos puertas de la
+   *  caja de comentarios sin cuenta: publicar y el botón de GIF. */
+  const irALogin = () => router.push(`/login?next=/post/${post.id}`);
 
   const borrar = () => {
     setConfirmando(false);
@@ -103,7 +171,14 @@ export function PostCard({
   const fotoEntera = post.media.length === 1;
 
   return (
-    <div ref={box} className={`relative${fotoEntera ? " post-foto-entera" : ""}`}>
+    <div
+      ref={box}
+      /*  `post-likes-click` le pone el cursor de mano a los likes del renglón
+          de la librería (ver `globals.css`): sin eso, el único que sabe que
+          ahí se puede tocar es quien lo programó. */
+      className={`relative${fotoEntera ? " post-foto-entera" : ""}${likers.length ? " post-likes-click" : ""}`}
+      onClick={abrirLikesSiEsElRenglon}
+    >
       <SocialPost
         author={post.author}
         time={post.time}
@@ -136,20 +211,39 @@ export function PostCard({
           if (!detail) router.push(`/post/${post.id}`);
         }}
       >
-        <CommentBox
+        {/*  El mismo "ver quiénes" para quien navega con teclado: la línea
+            social de la librería son `span`s, no hay forma de tabular hasta
+            ahí. Invisible hasta que recibe el foco. */}
+        {!!likers.length && (
+          <button
+            type="button"
+            onClick={() => setVerLikes(true)}
+            className="sr-only focus-visible:not-sr-only focus-visible:mb-2 focus-visible:inline-block focus-visible:rounded-lg focus-visible:bg-surface-alt focus-visible:px-3 focus-visible:py-1.5 focus-visible:text-xs focus-visible:font-semibold"
+          >
+            Ver a quiénes les gusta
+          </button>
+        )}
+
+        <Comentarios
           comments={post.comments}
-          // `currentUser` es opcional en la librería: sin sesión la caja se
-          // dibuja sin avatar en vez de con el de nadie.
+          // `currentUser` es opcional: sin sesión la caja se dibuja sin avatar
+          // en vez de con el de nadie.
           currentUser={session ? { name: session.name, avatar: session.avatar } : undefined}
-          onSubmit={(text, parentId) => {
+          /*  El botón de GIF se dibuja con sesión y sin ella; lo que cambia es lo
+           *  que hace. Sin cuenta no abre el selector —`/api/giphy` pide sesión y
+           *  sería buscar para recibir un 401— sino que manda a iniciar sesión,
+           *  igual que al intentar publicar. Esconderlo haría que un visitante no
+           *  se enterara nunca de que los comentarios tienen GIFs. */
+          onGifSinSesion={session ? undefined : irALogin}
+          onSubmit={(text, parentId, gif) => {
             // Comentar sin cuenta no falla en silencio: la Server Action lo
             // rechazaría igual (lee el uid de la cookie), pero recién después de
             // que la persona escribió el comentario entero.
             if (!session) {
-              router.push(`/login?next=/post/${post.id}`);
+              irALogin();
               return;
             }
-            return addComment(post.id, text, parentId);
+            return addComment(post.id, text, parentId, gif);
           }}
           onLike={(id, isLiked) => void toggleCommentLike(id, isLiked)}
           onDelete={
@@ -158,7 +252,12 @@ export function PostCard({
                   const removed = post.comments.find((c) => c.id === id);
                   void deleteComment(id);
                   undo("Comentario eliminado", () => {
-                    if (removed) void addComment(post.id, removed.text, removed.parentId);
+                    // El deshacer repone el comentario entero, GIF incluido: sin
+                    // `removed.gif` un comentario que era sólo un GIF volvería
+                    // vacío — y `addComment` lo descartaría sin escribir nada.
+                    if (removed) {
+                      void addComment(post.id, removed.text, removed.parentId, removed.gif);
+                    }
                   });
                 }
               : undefined
@@ -168,6 +267,13 @@ export function PostCard({
           title={detail ? "Comentarios" : `Comentarios (${post.counts.comments})`}
         />
       </SocialPost>
+
+      <LikesSheet
+        open={verLikes}
+        likers={likers}
+        meId={session?.id}
+        onClose={() => setVerLikes(false)}
+      />
 
       {puedeBorrar && (
         <Dropdown

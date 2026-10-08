@@ -10,6 +10,7 @@ import { COL, SUB } from "@/lib/firebase/collections";
 import type { CommentDoc, GalleryDoc, PostDoc, UserDoc } from "@/lib/firebase/schema";
 import { getDirectorio } from "@/lib/social/directorio";
 import { saneaFicha, type FichaInput } from "@/lib/social/ficha";
+import { saneaGif } from "@/lib/social/giphy";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
 import type { GalleryItem, PostMediaItem } from "@/lib/social/types";
 
@@ -399,16 +400,33 @@ export async function removeGalleryItem(id: string): Promise<void> {
 
 /* ── comentarios ─────────────────────────────────────────────────────────── */
 
+/** Comenta una publicación, o responde a un comentario.
+ *
+ *  Un comentario es texto, un GIF, o los dos: lo único que se rechaza es que no
+ *  venga ninguna de las dos cosas. Es el mismo criterio que `publishPost` con
+ *  texto y fotos.
+ *
+ *  `gif` entra como `unknown` y no como `CommentGif` a propósito. El tipo de la
+ *  firma lo valida TypeScript en nuestro código, pero una Server Action es un
+ *  endpoint POST: lo que llega por el cable es JSON que alguien puede escribir a
+ *  mano, y ahí el tipo no existe. El filtro de verdad es `saneaGif`, que corre
+ *  acá y recorta el objeto a cinco campos con la URL atada a un dominio de
+ *  Giphy — sin eso, este parámetro sería un `<img src>` libre publicado en el
+ *  feed con el nombre de quien comentó.
+ */
 export async function addComment(
   postId: string,
   text: string,
   parentId?: string | null,
+  gif?: unknown,
 ): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
 
   const clean = text.trim();
-  if (!clean) return;
+  const gifOk = saneaGif(gif);
+  // Un GIF solo es un comentario válido; nada de las dos cosas, no.
+  if (!clean && !gifOk) return;
 
   const db2 = adminDb();
   const postRef = db2.collection(COL.post).doc(postId);
@@ -430,6 +448,9 @@ export async function addComment(
     createdAt: FieldValue.serverTimestamp(),
     likedBy: [],
     parentId: parentId ?? null,
+    // Spread y no `gif: gifOk`: Firestore rechaza `undefined`, y el campo tiene
+    // que faltar —no quedar en `null`— cuando no hay GIF.
+    ...(gifOk ? { gif: gifOk } : {}),
   });
   batch.update(postRef, { commentCount: FieldValue.increment(1) });
   batch.update(db2.collection(COL.user).doc(uid), {
@@ -444,7 +465,10 @@ export async function addComment(
     kind: "comment",
     actorId: uid,
     text: `${await nombreDe(uid)} comentó tu publicación`,
-    description: recorte(clean),
+    // La campanita es texto: un comentario que es sólo un GIF no tiene bajada
+    // que mostrar, y dejarla vacía se vería como un aviso a medio escribir. El
+    // título del GIF no sirve acá — son los tags de Giphy, no lo que quiso decir.
+    description: clean ? recorte(clean) : "Respondió con un GIF",
     href: `/post/${postId}`,
   });
   revalidatePath("/notificaciones");
