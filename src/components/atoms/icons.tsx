@@ -576,3 +576,14 @@ export const LogoutIcon = (p: IconProps) => (
     <path d="m15.5 8.8 3.2 3.2-3.2 3.2" />
   </Icon>
 );
+
+/** Nota musical. Es el "adjuntar canción" de Spotify en los posts y en los
+ *  comentarios: una nota y no el logo de Spotify, que es marca registrada y
+ *  tiene sus propias reglas de uso. */
+export const MusicIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 18V5.5l11-2V16" />
+    <circle cx="6.5" cy="18" r="2.5" />
+    <circle cx="17.5" cy="16" r="2.5" />
+  </Icon>
+);

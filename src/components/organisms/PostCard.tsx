@@ -1,11 +1,20 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Button, Dropdown, Modal, SocialPost, useSnackbar } from "lib-kit-components";
 
 import { Comentarios } from "@/components/organisms/Comentarios";
 import { LikesSheet } from "@/components/organisms/LikesSheet";
+import { SpotifyEmbed } from "@/components/organisms/SpotifyEmbed";
 import {
   addComment,
   deleteComment,
@@ -56,7 +65,62 @@ import type { LikerVM, PostVM, SessionVM } from "@/lib/social/queries";
  *  nombres y no hay nada parecido a un `onLikes`. Así que el click se agarra
  *  por delegación en el wrapper y se decide por la forma del DOM; el detalle
  *  está en `abrirLikesSiEsElRenglon`.
+ *
+ *  ⚠️ Cuarto desvío: la canción de Spotify del post. `SocialPost` no tiene
+ *  dónde ponerla —`media` es `{ src, alt }` y se dibuja con `<img>`—, y el slot
+ *  `children` va **al final**, debajo de los botones de like y comentar: una
+ *  canción ahí se lee como parte de los comentarios, no del post. Así que el
+ *  reproductor se monta con un portal en un hueco que se inserta en el
+ *  `article`, justo antes de la línea social —después del texto y las fotos,
+ *  que es donde va—. Se encuentra por la misma forma de DOM que usa
+ *  `abrirLikesSiEsElRenglon`; si la librería cambia y no la encuentra, el hueco
+ *  va arriba de los comentarios, que es feo pero funciona. El detalle está en
+ *  `useHuecoCancion`.
  */
+
+/** Verdadero sólo en el cliente, ya hidratado. Con `useSyncExternalStore` y no
+ *  con un `useState` + `useEffect`: el server snapshot es `false`, así que la
+ *  hidratación coincide con el HTML del servidor y recién después se pinta el
+ *  portal, sin un `setState` en un efecto. */
+const sinSuscripcion = () => () => {};
+const useHidratado = () =>
+  useSyncExternalStore(
+    sinSuscripcion,
+    () => true,
+    () => false,
+  );
+
+/** Selector de la "línea social" de `SocialPost`: el único `div` hijo directo
+ *  del `article` con tipografía de 11px. Ver `abrirLikesSiEsElRenglon`. */
+const esLineaSocial = (el: Element) =>
+  el.tagName === "DIV" && el.className.includes("text-[11px]");
+
+/** El hueco donde va el reproductor del post, ya insertado en el `article` de
+ *  `SocialPost`; `null` si el post no tiene canción o todavía no hidrató.
+ *
+ *  El `div` se crea una vez por tarjeta y vive fuera de React: lo inserta el
+ *  efecto y lo saca la limpieza. React no lo ve como hijo del `article`, así
+ *  que no lo toca al re-renderizar, y el `<iframe>` que tiene adentro —vía
+ *  portal— sigue sonando mientras la tarjeta cambia likes o comentarios. */
+function useHuecoCancion(box: React.RefObject<HTMLDivElement | null>, conCancion: boolean) {
+  const hidratado = useHidratado();
+  const [hueco] = useState(() => {
+    if (typeof document === "undefined") return null;
+    const div = document.createElement("div");
+    div.className = "px-4 pt-3";
+    return div;
+  });
+
+  useEffect(() => {
+    const article = box.current?.querySelector("article");
+    if (!conCancion || !hueco || !article) return;
+    const linea = [...article.children].find(esLineaSocial) ?? article.lastElementChild;
+    article.insertBefore(hueco, linea);
+    return () => hueco.remove();
+  }, [box, hueco, conCancion]);
+
+  return hidratado && conCancion ? hueco : null;
+}
 export function PostCard({
   post,
   session,
@@ -81,6 +145,7 @@ export function PostCard({
   const [confirmando, setConfirmando] = useState(false);
   const [borrado, setBorrado] = useState(false);
   const [verLikes, setVerLikes] = useState(false);
+  const huecoCancion = useHuecoCancion(box, !!post.spotify);
 
   /*  La lista que abre la hoja, corregida con el estado optimista del botón.
    *
@@ -229,13 +294,14 @@ export function PostCard({
           // `currentUser` es opcional: sin sesión la caja se dibuja sin avatar
           // en vez de con el de nadie.
           currentUser={session ? { name: session.name, avatar: session.avatar } : undefined}
-          /*  El botón de GIF se dibuja con sesión y sin ella; lo que cambia es lo
-           *  que hace. Sin cuenta no abre el selector —`/api/giphy` pide sesión y
-           *  sería buscar para recibir un 401— sino que manda a iniciar sesión,
-           *  igual que al intentar publicar. Esconderlo haría que un visitante no
-           *  se enterara nunca de que los comentarios tienen GIFs. */
-          onGifSinSesion={session ? undefined : irALogin}
-          onSubmit={(text, parentId, gif) => {
+          /*  Los botones de GIF y de canción se dibujan con sesión y sin ella; lo
+           *  que cambia es lo que hacen. Sin cuenta no abren el selector
+           *  —`/api/giphy` y `previsualizarSpotify` piden sesión y sería buscar
+           *  para recibir un "no"— sino que mandan a iniciar sesión, igual que al
+           *  intentar publicar. Esconderlos haría que un visitante no se enterara
+           *  nunca de que los comentarios tienen GIFs y canciones. */
+          onAdjuntoSinSesion={session ? undefined : irALogin}
+          onSubmit={(text, parentId, gif, spotify) => {
             // Comentar sin cuenta no falla en silencio: la Server Action lo
             // rechazaría igual (lee el uid de la cookie), pero recién después de
             // que la persona escribió el comentario entero.
@@ -243,7 +309,7 @@ export function PostCard({
               irALogin();
               return;
             }
-            return addComment(post.id, text, parentId, gif);
+            return addComment(post.id, text, parentId, gif, spotify);
           }}
           onLike={(id, isLiked) => void toggleCommentLike(id, isLiked)}
           onDelete={
@@ -252,11 +318,17 @@ export function PostCard({
                   const removed = post.comments.find((c) => c.id === id);
                   void deleteComment(id);
                   undo("Comentario eliminado", () => {
-                    // El deshacer repone el comentario entero, GIF incluido: sin
-                    // `removed.gif` un comentario que era sólo un GIF volvería
-                    // vacío — y `addComment` lo descartaría sin escribir nada.
+                    // El deshacer repone el comentario entero, GIF y canción
+                    // incluidos: sin ellos un comentario que era sólo un adjunto
+                    // volvería vacío — y `addComment` lo descartaría sin escribir.
                     if (removed) {
-                      void addComment(post.id, removed.text, removed.parentId, removed.gif);
+                      void addComment(
+                        post.id,
+                        removed.text,
+                        removed.parentId,
+                        removed.gif,
+                        removed.spotify,
+                      );
                     }
                   });
                 }
@@ -267,6 +339,10 @@ export function PostCard({
           title={detail ? "Comentarios" : `Comentarios (${post.counts.comments})`}
         />
       </SocialPost>
+
+      {huecoCancion &&
+        post.spotify &&
+        createPortal(<SpotifyEmbed item={post.spotify} />, huecoCancion)}
 
       <LikesSheet
         open={verLikes}
@@ -324,7 +400,7 @@ export function PostCard({
         }
       >
         <p className="line-clamp-3 text-sm text-muted">
-          {post.text || "Publicación con fotos"}
+          {post.text || (post.media.length ? "Publicación con fotos" : "Publicación con una canción")}
         </p>
       </Modal>
     </div>

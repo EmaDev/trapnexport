@@ -3,6 +3,7 @@ import type {
   CommentGif,
   NotificationKind,
   PlayerFicha,
+  SpotifyItem,
 } from "@/lib/social/types";
 
 /** La forma **exacta** de lo que hay guardado en Firestore.
@@ -484,6 +485,10 @@ export interface PostDoc {
   authorId: string;
   text: string;
   media: PostMediaDoc[];
+  /** la canción de Spotify del post, si adjuntó una. Una sola: el reproductor
+   *  ocupa el ancho de la tarjeta. **Ausente, no `null`, cuando no hay** —mismo
+   *  motivo que `CommentDoc.gif`—. Ver `SpotifyItem` en `lib/social/types.ts`. */
+  spotify?: SpotifyItem;
   createdAt: FsTimestamp;
   /** uid de quienes reaccionaron; el contador sale del `length`.
    *
@@ -517,8 +522,9 @@ export interface CommentDoc {
   postId: string;
   /** uid de Firebase Auth de quien comentó */
   authorId: string;
-  /** puede ser `""` **si y sólo si** hay `gif`: un comentario necesita texto o
-   *  GIF, y `addComment` rechaza el que no trae ninguno de los dos. */
+  /** puede ser `""` **si y sólo si** hay `gif` o `spotify`: un comentario
+   *  necesita texto, GIF o canción, y `addComment` rechaza el que no trae
+   *  ninguno. */
   text: string;
   createdAt: FsTimestamp;
   likedBy: string[];
@@ -536,6 +542,9 @@ export interface CommentDoc {
    *  Firestore, así que `addComment` arma el documento con spread condicional
    *  en vez de poner el campo siempre. */
   gif?: CommentGif;
+  /** la canción de Spotify con la que respondió, si eligió una. Ausente cuando
+   *  no hay, igual que `gif`. */
+  spotify?: SpotifyItem;
 }
 
 /* ── trapnexport-user/{uid}/saved/{postId} ───────────────────────────────── */

@@ -17,6 +17,7 @@ import type {
   GalleryItem,
   NotificationKind,
   PlayerFicha,
+  SpotifyItem,
 } from "@/lib/social/types";
 import { relativeTime, shortDate } from "@/lib/time";
 
@@ -65,7 +66,7 @@ export interface CommentVM {
   id: string;
   author: string;
   avatar?: string;
-  /** vacío **sólo** si hay `gif`; ver `CommentDoc.text` */
+  /** vacío **sólo** si hay `gif` o `spotify`; ver `CommentDoc.text` */
   text: string;
   at: number;
   likes: number;
@@ -76,6 +77,8 @@ export interface CommentVM {
   /** el GIF de Giphy del comentario, si eligió uno. Viaja tal cual está
    *  guardado: la URL es del CDN de Giphy y la sirve el navegador directo. */
   gif?: CommentGif;
+  /** la canción de Spotify del comentario, si eligió una */
+  spotify?: SpotifyItem;
 }
 
 export interface PostVM {
@@ -86,6 +89,8 @@ export interface PostVM {
   createdAt: number;
   text: string;
   media: { src: string; alt: string }[];
+  /** la canción de Spotify del post; la dibuja `PostCard`, no `SocialPost` */
+  spotify?: SpotifyItem;
   counts: { likes: number; comments: number; shares: number };
   liked: boolean;
   saved: boolean;
@@ -280,6 +285,7 @@ const toCommentVM = (
     pinned: c.pinned,
     authorBadge: author?.verified ? "Verificado" : undefined,
     gif: c.gif,
+    spotify: c.spotify,
   };
 };
 
@@ -301,6 +307,7 @@ const toPostVM = (
     createdAt: aMillis(p.createdAt),
     text: p.text,
     media: p.media ?? [],
+    spotify: p.spotify,
     counts: {
       likes: likedBy.length,
       // El desnormalizado y no `comments.length`: el feed no baja todos los

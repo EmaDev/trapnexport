@@ -1,13 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { AnimatePresence } from "framer-motion";
 import { useRef, useState, useTransition } from "react";
 import { Button, Card, Textarea, useSnackbar } from "lib-kit-components";
 
-import { CloseIcon, ImageIcon, SendIcon } from "@/components/atoms/icons";
+import { CloseIcon, ImageIcon, MusicIcon, SendIcon } from "@/components/atoms/icons";
+import { SpotifyEmbed } from "@/components/organisms/SpotifyEmbed";
+import { SpotifyPicker } from "@/components/organisms/SpotifyPicker";
 import { deletePostImage, uploadPostImage } from "@/lib/storage/post-image";
 import { publishPost } from "@/lib/social/actions";
 import type { SessionVM } from "@/lib/social/queries";
+import type { SpotifyItem } from "@/lib/social/types";
 
 /** Cuántas imágenes entran en un post. Es el límite de `SocialPost`: muestra
  *  cuatro y colapsa el resto en un "+N", así que la quinta es peso que nadie
@@ -16,7 +20,8 @@ const MAX_FOTOS = 4;
 
 /** El creador de posteos.
  *
- *  Texto + hasta cuatro fotos. **Sólo fotos, no videos**: el post se dibuja con
+ *  Texto + hasta cuatro fotos + una canción de Spotify (`SpotifyPicker`, que se
+ *  publica como reproductor embebido). **Sólo fotos, no videos**: el post se dibuja con
  *  `SocialPost` de `lib-kit-components`, cuyo `PostMedia` es `{ src, alt }` y
  *  se renderiza con un `<img>` — un video ahí no se ve. Los videos van al
  *  carrete del perfil (`PersonalMediaUploader`), que dibujamos nosotros y sí
@@ -46,9 +51,12 @@ export function PostComposer({
   const [text, setText] = useState("");
   const [fotos, setFotos] = useState<{ src: string; alt: string; path: string }[]>([]);
   const [leyendo, setLeyendo] = useState(false);
+  const [cancion, setCancion] = useState<SpotifyItem | null>(null);
+  const [eligiendoCancion, setEligiendoCancion] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const vacio = !text.trim() && fotos.length === 0;
+  // Una canción sola es un post válido, igual que una foto sola.
+  const vacio = !text.trim() && fotos.length === 0 && !cancion;
 
   const addFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -94,19 +102,21 @@ export function PostComposer({
 
   const publicar = () => {
     if (vacio) return;
-    const payload = { text, media: fotos };
+    const payload = { text, media: fotos, spotify: cancion };
 
     // Se limpia antes de que resuelva la action: el post ya está aceptado y
     // dejar el texto en la caja invita a publicarlo dos veces.
     setText("");
     setFotos([]);
+    setCancion(null);
+    setEligiendoCancion(false);
     // Antes de esperar a la action, por lo mismo: el post ya está aceptado y
     // dejar la hoja abierta durante el round-trip invita a publicarlo dos
     // veces. La confirmación la da la snackbar, que se ve por encima.
     onPublished?.();
 
     startTransition(async () => {
-      await publishPost(payload.text, payload.media);
+      await publishPost(payload.text, payload.media, payload.spotify ?? undefined);
       // `refresh` re-corre el layout del módulo público: sin esto el post sale
       // pero el badge de la campana (que vive en `AppShell`, del lado servidor)
       // no se entera hasta recargar.
@@ -156,6 +166,33 @@ export function PostComposer({
         </ul>
       )}
 
+      {cancion && (
+        <div className="relative">
+          <SpotifyEmbed item={cancion} />
+          <button
+            type="button"
+            aria-label="Quitar la canción"
+            onClick={() => setCancion(null)}
+            className="absolute -right-1.5 -top-1.5 grid size-6 place-items-center rounded-full bg-black/65 text-white"
+          >
+            <CloseIcon className="size-3.5" width="1em" height="1em" />
+          </button>
+        </div>
+      )}
+
+      <AnimatePresence initial={false}>
+        {eligiendoCancion && !cancion && (
+          <SpotifyPicker
+            key="spotify"
+            onClose={() => setEligiendoCancion(false)}
+            onPick={(item) => {
+              setCancion(item);
+              setEligiendoCancion(false);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
@@ -170,6 +207,18 @@ export function PostComposer({
         <span className="text-xs text-muted">
           {fotos.length}/{MAX_FOTOS}
         </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          // Una canción por post: con una ya elegida el botón no hace nada que
+          // no haga la X del reproductor.
+          disabled={!!cancion}
+          aria-expanded={eligiendoCancion}
+          leftIcon={<MusicIcon className="size-5" width="1em" height="1em" />}
+          onClick={() => setEligiendoCancion((v) => !v)}
+        >
+          Canción
+        </Button>
 
         <Button
           className="ml-auto"

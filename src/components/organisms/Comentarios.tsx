@@ -4,9 +4,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useMemo, useState } from "react";
 
 import { Avatar } from "@/components/atoms/Avatar";
+import { MusicIcon } from "@/components/atoms/icons";
 import { GifPicker } from "@/components/organisms/GifPicker";
+import { SpotifyEmbed } from "@/components/organisms/SpotifyEmbed";
+import { SpotifyPicker } from "@/components/organisms/SpotifyPicker";
 import { relativeTime } from "@/lib/time";
-import type { CommentGif } from "@/lib/social/types";
+import type { CommentGif, SpotifyItem } from "@/lib/social/types";
 
 /** La caja de comentarios del feed. Reemplaza al `CommentBox` de
  *  `lib-kit-components`.
@@ -22,10 +25,11 @@ import type { CommentGif } from "@/lib/social/types";
  *
  *  Así que esto es ese componente con dos cosas agregadas y nada quitado:
  *
- *  - `Comentario` suma `gif` (ver `CommentGif`), y la burbuja lo dibuja debajo
- *    del texto;
- *  - el compositor suma el botón de GIF y el `GifPicker`, y `onSubmit` pasa a
- *    ser `(text, parentId, gif)`.
+ *  - `Comentario` suma `gif` (ver `CommentGif`) y `spotify` (ver
+ *    `SpotifyItem`), y la burbuja los dibuja debajo del texto;
+ *  - el compositor suma los botones de GIF y de canción con sus selectores
+ *    (`GifPicker`, `SpotifyPicker`), y `onSubmit` pasa a ser
+ *    `(text, parentId, gif, spotify)`.
  *
  *  Todo lo demás —hilos de una respuesta, "fijado", likes con el pulgar,
  *  contador de caracteres, "ver N más", el orden de fijados primero y después
@@ -49,7 +53,8 @@ export interface Comentario {
   id: string;
   author: string;
   avatar?: string;
-  /** puede venir vacío **si** hay `gif`: un GIF solo es un comentario válido */
+  /** puede venir vacío **si** hay `gif` o `spotify`: un GIF o una canción solos
+   *  son un comentario válido */
   text: string;
   /** timestamp para ordenar; se muestra relativo */
   at: number;
@@ -60,6 +65,7 @@ export interface Comentario {
   pinned?: boolean;
   authorBadge?: string;
   gif?: CommentGif;
+  spotify?: SpotifyItem;
 }
 
 interface ComentariosProps {
@@ -69,6 +75,7 @@ interface ComentariosProps {
     text: string,
     parentId: string | null,
     gif: CommentGif | null,
+    spotify: SpotifyItem | null,
   ) => void | Promise<void>;
   onLike?: (id: string, liked: boolean) => void;
   onDelete?: (id: string) => void;
@@ -82,13 +89,17 @@ interface ComentariosProps {
    *  se puede comentar, así que abrir el selector —que además pide sesión en
    *  `/api/giphy`— sería una búsqueda que termina en un 401. */
   allowGif?: boolean;
-  /** Si viene, el botón de GIF llama a esto en vez de abrir el selector.
+  /** `false` esconde el botón de canción de Spotify. */
+  allowSpotify?: boolean;
+  /** Si viene, los botones de GIF y de canción llaman a esto en vez de abrir
+   *  su selector.
    *
-   *  Es para la caja sin sesión: el botón se dibuja igual —esconderlo haría que
-   *  un visitante no se enterara nunca de que los comentarios tienen GIFs— y al
-   *  tocarlo manda a iniciar sesión. Es el mismo trato que ya recibe el textarea,
-   *  que se muestra sin cuenta y al publicar manda a `/login`. */
-  onGifSinSesion?: () => void;
+   *  Es para la caja sin sesión: los botones se dibujan igual —esconderlos haría
+   *  que un visitante no se enterara nunca de que los comentarios tienen GIFs y
+   *  canciones— y al tocarlos manda a iniciar sesión. Es el mismo trato que ya
+   *  recibe el textarea, que se muestra sin cuenta y al publicar manda a
+   *  `/login`. Los dos selectores, además, consultan al servidor con sesión. */
+  onAdjuntoSinSesion?: () => void;
   title?: string;
   className?: string;
 }
@@ -130,7 +141,8 @@ function Composer({
   placeholder,
   maxLength,
   allowGif,
-  onGifSinSesion,
+  allowSpotify,
+  onAdjuntoSinSesion,
   onSubmit,
   onCancel,
   autoFocus,
@@ -140,32 +152,52 @@ function Composer({
   placeholder: string;
   maxLength: number;
   allowGif: boolean;
-  onGifSinSesion?: () => void;
-  onSubmit: (text: string, gif: CommentGif | null) => void | Promise<void>;
+  allowSpotify: boolean;
+  onAdjuntoSinSesion?: () => void;
+  onSubmit: (
+    text: string,
+    gif: CommentGif | null,
+    spotify: SpotifyItem | null,
+  ) => void | Promise<void>;
   onCancel?: () => void;
   autoFocus?: boolean;
   compact?: boolean;
 }) {
   const [text, setText] = useState("");
   const [gif, setGif] = useState<CommentGif | null>(null);
-  const [eligiendo, setEligiendo] = useState(false);
+  const [cancion, setCancion] = useState<SpotifyItem | null>(null);
+  /** qué selector está abierto. Uno a la vez: los dos son paneles en el flujo
+   *  y abiertos juntos empujarían el comentario medio metro para abajo. */
+  const [eligiendo, setEligiendo] = useState<"gif" | "spotify" | null>(null);
   const [busy, setBusy] = useState(false);
   const [focus, setFocus] = useState(!!autoFocus);
   const left = maxLength - text.length;
   const near = left <= maxLength * 0.15;
 
-  /*  Con un GIF elegido se puede publicar sin escribir nada: el GIF **es** el
-   *  comentario. Es la misma regla que valida `addComment` del otro lado. */
-  const puedeEnviar = (!!text.trim() || !!gif) && !busy;
+  /*  Con un GIF o una canción elegidos se puede publicar sin escribir nada: el
+   *  adjunto **es** el comentario. Es la misma regla que valida `addComment`
+   *  del otro lado. */
+  const puedeEnviar = (!!text.trim() || !!gif || !!cancion) && !busy;
+
+  /** Abre o cierra un selector; sin sesión, manda a iniciar sesión, igual que
+   *  al intentar publicar. */
+  const alternar = (cual: "gif" | "spotify") => {
+    if (onAdjuntoSinSesion) {
+      onAdjuntoSinSesion();
+      return;
+    }
+    setEligiendo((v) => (v === cual ? null : cual));
+  };
 
   const send = async () => {
     if (!puedeEnviar) return;
     setBusy(true);
     try {
-      await onSubmit(text.trim(), gif);
+      await onSubmit(text.trim(), gif, cancion);
       setText("");
       setGif(null);
-      setEligiendo(false);
+      setCancion(null);
+      setEligiendo(null);
     } finally {
       setBusy(false);
     }
@@ -176,7 +208,7 @@ function Composer({
       {user && <Avatar name={user.name} src={user.avatar} size={compact ? 30 : 36} />}
       <div className="min-w-0 flex-1">
         <div
-          className={`rounded-2xl border bg-surface-alt/60 transition-colors ${focus || gif || eligiendo ? "border-primary" : "border-border"}`}
+          className={`rounded-2xl border bg-surface-alt/60 transition-colors ${focus || gif || cancion || eligiendo ? "border-primary" : "border-border"}`}
         >
           {/*  El botón de GIF va acá, al lado del textarea, y **no** en la barra
               de acciones de abajo: esa barra se despliega al enfocar, así que un
@@ -206,11 +238,29 @@ function Composer({
               }}
               className="min-w-0 flex-1 resize-none bg-transparent px-3.5 py-2.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted"
             />
+            {allowSpotify && (
+              <button
+                type="button"
+                aria-expanded={eligiendo === "spotify"}
+                aria-label={eligiendo === "spotify" ? "Cerrar Spotify" : "Responder con una canción"}
+                title="Responder con una canción de Spotify"
+                // Mismo motivo que el `preventDefault` del botón de GIF, abajo.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => alternar("spotify")}
+                className={`my-1.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors ${allowGif ? "" : "mr-1.5"} ${
+                  eligiendo === "spotify"
+                    ? "border-primary bg-primary/12 text-primary"
+                    : "border-border text-muted hover:bg-surface hover:text-foreground"
+                }`}
+              >
+                <MusicIcon width="15" height="15" strokeWidth={2} />
+              </button>
+            )}
             {allowGif && (
               <button
                 type="button"
-                aria-expanded={eligiendo}
-                aria-label={eligiendo ? "Cerrar los GIFs" : "Responder con un GIF"}
+                aria-expanded={eligiendo === "gif"}
+                aria-label={eligiendo === "gif" ? "Cerrar los GIFs" : "Responder con un GIF"}
                 title="Responder con un GIF"
                 /*  Sin esto el botón no se puede tocar cuando el textarea tiene
                  *  el foco: `onBlur` dispara en el mousedown —antes del click— y
@@ -218,17 +268,9 @@ function Composer({
                  *  evita que el foco se mueva. Es el truco de siempre de las
                  *  barras de herramientas sobre un campo de texto. */
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  // Sin sesión no se abre el selector: se manda a iniciar sesión,
-                  // igual que al intentar publicar.
-                  if (onGifSinSesion) {
-                    onGifSinSesion();
-                    return;
-                  }
-                  setEligiendo((v) => !v);
-                }}
+                onClick={() => alternar("gif")}
                 className={`m-1.5 inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors ${
-                  eligiendo
+                  eligiendo === "gif"
                     ? "border-primary bg-primary/12 text-primary"
                     : "border-border text-muted hover:bg-surface hover:text-foreground"
                 }`}
@@ -278,13 +320,40 @@ function Composer({
             )}
           </AnimatePresence>
 
+          {/*  La canción elegida, igual que el GIF: se ve —y se puede escuchar—
+              antes de publicar, y se saca sin perder el texto. */}
+          <AnimatePresence initial={false}>
+            {cancion && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="flex items-start gap-2 px-3.5 pb-1">
+                  <SpotifyEmbed item={cancion} compact className="min-w-0 flex-1" />
+                  <button
+                    type="button"
+                    onClick={() => setCancion(null)}
+                    aria-label="Quitar la canción"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/*  La barra de publicar aparece al enfocar, igual que en la librería.
-              Se suman dos motivos para que siga abierta: hay un GIF elegido, o el
-              selector está abierto —cerrarla ahí escondería el botón de publicar
+              Se suman dos motivos para que siga abierta: hay un adjunto elegido,
+              o un selector está abierto —cerrarla ahí escondería el botón de publicar
               justo cuando hace falta, porque tocar el selector saca el foco del
               textarea—. El botón de GIF **no** vive acá: ver arriba. */}
           <AnimatePresence initial={false}>
-            {(focus || text || gif || eligiendo) && (
+            {(focus || text || gif || cancion || eligiendo) && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: "auto", opacity: 1 }}
@@ -331,15 +400,25 @@ function Composer({
         </div>
 
         <AnimatePresence initial={false}>
-          {eligiendo && (
+          {eligiendo === "gif" && (
             <GifPicker
               key="picker"
-              onClose={() => setEligiendo(false)}
+              onClose={() => setEligiendo(null)}
               onPick={(g) => {
                 // Se guardan los cinco campos de `CommentGif` y se descarta
                 // `preview`: la miniatura es de la grilla, no del comentario.
                 setGif({ id: g.id, url: g.url, width: g.width, height: g.height, title: g.title });
-                setEligiendo(false);
+                setEligiendo(null);
+              }}
+            />
+          )}
+          {eligiendo === "spotify" && (
+            <SpotifyPicker
+              key="spotify"
+              onClose={() => setEligiendo(null)}
+              onPick={(item) => {
+                setCancion(item);
+                setEligiendo(null);
               }}
             />
           )}
@@ -360,7 +439,8 @@ export function Comentarios({
   pageSize = 4,
   allowReplies = true,
   allowGif = true,
-  onGifSinSesion,
+  allowSpotify = true,
+  onAdjuntoSinSesion,
   title = "Comentarios",
   className = "",
 }: ComentariosProps) {
@@ -379,8 +459,17 @@ export function Comentarios({
   const repliesOf = (id: string) =>
     comments.filter((c) => c.parentId === id).sort((a, b) => a.at - b.at);
 
-  const Row = ({ c, depth = 0 }: { c: Comentario; depth?: number }) => (
+  /*  Una función que devuelve la fila y **no** un componente (`<Row />`).
+   *
+   *  Definido adentro del render, un componente es un tipo nuevo en cada render
+   *  de `Comentarios`, y React desmonta y vuelve a montar todas las filas cada
+   *  vez —tocar "Responder" o "ver más" alcanza—. Con texto y GIFs no se notaba;
+   *  con el reproductor de Spotify sí: remontar el `<iframe>` lo recarga y corta
+   *  la canción que estaba sonando. Llamada como función, las filas son parte
+   *  del árbol de `Comentarios` y sólo se re-renderizan. */
+  const renderRow = (c: Comentario, depth = 0) => (
     <motion.div
+      key={c.id}
       layout
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
@@ -403,8 +492,8 @@ export function Comentarios({
               </span>
             )}
           </p>
-          {/*  El texto se dibuja sólo si hay: un comentario que es puro GIF no
-              lleva un párrafo vacío empujando la imagen. */}
+          {/*  El texto se dibuja sólo si hay: un comentario que es puro GIF o
+              pura canción no lleva un párrafo vacío empujando el adjunto. */}
           {c.text && (
             <p
               className="mt-1 whitespace-pre-line text-sm leading-relaxed text-foreground"
@@ -414,6 +503,7 @@ export function Comentarios({
             </p>
           )}
           {c.gif && <GifComentario gif={c.gif} />}
+          {c.spotify && <SpotifyEmbed item={c.spotify} compact className="mt-2" />}
         </div>
         <div className="mt-1.5 flex items-center gap-3 px-1">
           <span className="text-[11px] text-muted">{relativeTime(c.at)}</span>
@@ -463,9 +553,7 @@ export function Comentarios({
           <>
             <div className="mt-3 space-y-3">
               <AnimatePresence initial={false}>
-                {repliesOf(c.id).map((r) => (
-                  <Row key={r.id} c={r} depth={1} />
-                ))}
+                {repliesOf(c.id).map((r) => renderRow(r, 1))}
               </AnimatePresence>
             </div>
             <AnimatePresence>
@@ -482,11 +570,12 @@ export function Comentarios({
                     user={currentUser}
                     maxLength={maxLength}
                     allowGif={allowGif}
-                    onGifSinSesion={onGifSinSesion}
+                    allowSpotify={allowSpotify}
+                    onAdjuntoSinSesion={onAdjuntoSinSesion}
                     placeholder={`Respondiendo a ${c.author}…`}
                     onCancel={() => setReplyTo(null)}
-                    onSubmit={async (text, gif) => {
-                      await onSubmit(text, c.id, gif);
+                    onSubmit={async (text, gif, spotify) => {
+                      await onSubmit(text, c.id, gif, spotify);
                       setReplyTo(null);
                     }}
                   />
@@ -512,16 +601,15 @@ export function Comentarios({
         user={currentUser}
         maxLength={maxLength}
         allowGif={allowGif}
-        onGifSinSesion={onGifSinSesion}
+        allowSpotify={allowSpotify}
+        onAdjuntoSinSesion={onAdjuntoSinSesion}
         placeholder={placeholder}
-        onSubmit={(text, gif) => onSubmit(text, null, gif)}
+        onSubmit={(text, gif, spotify) => onSubmit(text, null, gif, spotify)}
       />
 
       <div className="mt-5 space-y-4">
         <AnimatePresence initial={false}>
-          {roots.slice(0, shown).map((c) => (
-            <Row key={c.id} c={c} />
-          ))}
+          {roots.slice(0, shown).map((c) => renderRow(c))}
         </AnimatePresence>
       </div>
 

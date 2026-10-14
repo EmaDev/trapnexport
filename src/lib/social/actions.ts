@@ -12,6 +12,7 @@ import { getDirectorio } from "@/lib/social/directorio";
 import { saneaFicha, type FichaInput } from "@/lib/social/ficha";
 import { saneaGif } from "@/lib/social/giphy";
 import { notifyAll, notifyUser } from "@/lib/social/notify";
+import { saneaSpotify } from "@/lib/social/spotify";
 import type { GalleryItem, PostMediaItem } from "@/lib/social/types";
 
 /** Escrituras del dominio, como Server Actions.
@@ -65,11 +66,15 @@ const revalidatePublic = (postId?: string) => {
  *  trae la `downloadURL` en `src` y su ruta en el bucket en `path`. Por aci no
  *  viaja ningun archivo.
  *
- *  Un post puede ser solo texto o solo imagenes: lo unico que se rechaza es
- *  que no venga ninguna de las dos. */
+ *  Un post puede ser solo texto, solo imagenes o solo una cancion: lo unico
+ *  que se rechaza es que no venga nada.
+ *
+ *  `spotify` entra como `unknown` por lo mismo que el `gif` de `addComment`:
+ *  el filtro de verdad es `saneaSpotify`, que corre aca. */
 export async function publishPost(
   text: string,
   media: PostMediaItem[] = [],
+  spotify?: unknown,
 ): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
@@ -78,7 +83,8 @@ export async function publishPost(
   // `slice(0, 4)`: `SocialPost` muestra cuatro y colapsa el resto en un "+N",
   // asi que mas de cuatro es peso que nadie ve.
   const fotos = media.filter((m) => m.src).slice(0, 4);
-  if (!clean && fotos.length === 0) return;
+  const cancion = saneaSpotify(spotify);
+  if (!clean && fotos.length === 0 && !cancion) return;
 
   const db2 = adminDb();
   const ref = db2.collection(COL.post).doc();
@@ -91,6 +97,9 @@ export async function publishPost(
     authorId: uid,
     text: clean,
     media: fotos,
+    // Spread por lo mismo que el `gif` de un comentario: Firestore rechaza
+    // `undefined` y el campo tiene que faltar cuando no hay cancion.
+    ...(cancion ? { spotify: cancion } : {}),
     createdAt: FieldValue.serverTimestamp(),
     likedBy: [],
     shares: 0,
@@ -113,7 +122,7 @@ export async function publishPost(
     kind: "post",
     actorId: uid,
     text: `${await nombreDe(uid)} publicó en el feed`,
-    description: clean ? recorte(clean) : "Compartió fotos",
+    description: clean ? recorte(clean) : fotos.length ? "Compartió fotos" : "Compartió una canción",
     href: `/post/${id}`,
   });
 
@@ -402,9 +411,10 @@ export async function removeGalleryItem(id: string): Promise<void> {
 
 /** Comenta una publicación, o responde a un comentario.
  *
- *  Un comentario es texto, un GIF, o los dos: lo único que se rechaza es que no
- *  venga ninguna de las dos cosas. Es el mismo criterio que `publishPost` con
- *  texto y fotos.
+ *  Un comentario es texto, un GIF, una canción de Spotify, o cualquier
+ *  combinación: lo único que se rechaza es que no venga nada. Es el mismo
+ *  criterio que `publishPost` con texto y fotos. `spotify` pasa por
+ *  `saneaSpotify` por el mismo motivo que `gif` pasa por `saneaGif`.
  *
  *  `gif` entra como `unknown` y no como `CommentGif` a propósito. El tipo de la
  *  firma lo valida TypeScript en nuestro código, pero una Server Action es un
@@ -419,14 +429,16 @@ export async function addComment(
   text: string,
   parentId?: string | null,
   gif?: unknown,
+  spotify?: unknown,
 ): Promise<void> {
   const uid = await getCurrentUid();
   if (!uid) return;
 
   const clean = text.trim();
   const gifOk = saneaGif(gif);
-  // Un GIF solo es un comentario válido; nada de las dos cosas, no.
-  if (!clean && !gifOk) return;
+  const cancion = saneaSpotify(spotify);
+  // Un GIF o una canción solos son un comentario válido; nada de nada, no.
+  if (!clean && !gifOk && !cancion) return;
 
   const db2 = adminDb();
   const postRef = db2.collection(COL.post).doc(postId);
@@ -451,6 +463,7 @@ export async function addComment(
     // Spread y no `gif: gifOk`: Firestore rechaza `undefined`, y el campo tiene
     // que faltar —no quedar en `null`— cuando no hay GIF.
     ...(gifOk ? { gif: gifOk } : {}),
+    ...(cancion ? { spotify: cancion } : {}),
   });
   batch.update(postRef, { commentCount: FieldValue.increment(1) });
   batch.update(db2.collection(COL.user).doc(uid), {
@@ -468,7 +481,11 @@ export async function addComment(
     // La campanita es texto: un comentario que es sólo un GIF no tiene bajada
     // que mostrar, y dejarla vacía se vería como un aviso a medio escribir. El
     // título del GIF no sirve acá — son los tags de Giphy, no lo que quiso decir.
-    description: clean ? recorte(clean) : "Respondió con un GIF",
+    description: clean
+      ? recorte(clean)
+      : gifOk
+        ? "Respondió con un GIF"
+        : "Respondió con una canción",
     href: `/post/${postId}`,
   });
   revalidatePath("/notificaciones");

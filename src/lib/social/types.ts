@@ -213,3 +213,32 @@ export interface CommentGif {
 export interface GifSugerido extends CommentGif {
   preview: string;
 }
+
+/* ── música de Spotify ───────────────────────────────────────────────────── */
+
+/** Qué se puede compartir de Spotify: un tema, un disco o una playlist. Son los
+ *  tres que tienen reproductor embebido de música; podcasts y artistas quedan
+ *  afuera a propósito —esto es para compartir canciones—. */
+export type SpotifyKind = "track" | "album" | "playlist";
+
+/** Una canción (o disco, o playlist) de Spotify adjunta a un post o a un
+ *  comentario.
+ *
+ *  **Se guarda la referencia, no el audio ni la URL del embed.** El reproductor
+ *  es el `<iframe>` oficial de `open.spotify.com/embed/…`, y su `src` se arma
+ *  siempre de `kind` + `id` en `spotifyEmbedUrl` (`lib/social/spotify.ts`): no
+ *  hay ningún campo que sea una URL libre, así que no hay nada que sanear más
+ *  allá del formato del id. Mismo criterio que `CommentGif` —servir desde el
+ *  dominio del tercero, no rehostear—, con una ventaja: sin API key.
+ *
+ *  Lo que se escucha lo decide Spotify: el preview de 30 segundos sin sesión, el
+ *  tema entero para quien tiene la sesión de Spotify abierta en el navegador.
+ */
+export interface SpotifyItem {
+  kind: SpotifyKind;
+  /** id de Spotify: 22 caracteres base62 */
+  id: string;
+  /** el título que devuelve el oEmbed de Spotify; es el `title` del `<iframe>`.
+   *  Puede venir vacío si Spotify no contestó al previsualizar. */
+  title: string;
+}

@@ -445,6 +445,43 @@ encima de la barra con
 `!bottom-[calc(var(--bottom-nav)+1rem)]`: `--bottom-nav` es el alto real que
 publica `BottomNav` (`0px` en ≥`md`, donde no hay barra).
 
+**9 · Tocar los likes de una publicación abre la lista de quiénes los
+dieron.** La "línea social" de `SocialPost` —el corazón, el número y "Naza y 11
+más"— es texto muerto: `likedBy` es un `string[]` de nombres, la línea son
+`span`s y la librería no expone nada parecido a un `onLikes`. Los once nombres
+estaban ahí y no había forma de verlos.
+
+Las piezas:
+
+| Archivo | Qué hace |
+|---|---|
+| `src/lib/social/queries.ts` | `PostVM.likers`: **todas** las cuentas que dieron like (`LikerVM`), además del `likedBy` de nombres que necesita la librería |
+| `src/components/organisms/LikesSheet.tsx` | la hoja con la lista; cada fila abre el perfil |
+| `src/components/organisms/PostCard.tsx` | `abrirLikesSiEsElRenglon`: el click, por delegación |
+| `src/app/globals.css` | `.post-likes-click`: el cursor de mano sobre los likes |
+
+Tres decisiones:
+
+- **La lista viaja con el feed**, no se pide al abrir la hoja: los uid ya están
+  en `PostDoc.likedBy` y los nombres salen del directorio, que la pantalla ya
+  trae entero para los autores. Cero lecturas nuevas y la hoja abre sin
+  spinner. Son unos cien bytes por like; el día que un posteo junte cientos,
+  pasa a ser una lectura propia y paginada.
+- **El click se agarra por delegación en el wrapper** y se decide por la forma
+  del DOM —la línea es el único `div` hijo directo del `article` con tipografía
+  de 11px, y del `span` con `ml-auto` para la derecha están los contadores de
+  comentarios y compartidos, que no son likes—. Es el mismo truco que
+  `.post-foto-entera`. Si una versión nueva de la librería cambia esas clases,
+  el renglón vuelve a ser texto muerto y no se rompe nada más.
+- **La hoja corrige el estado optimista**: el botón de me gusta pinta al toque
+  y `post.likers` recién llega con el `revalidatePath`, así que mientras los
+  dos no coincidan la lista se arma sumando (o restando) a quien mira. Dar like
+  y no encontrarse en la lista es lo primero que se nota.
+
+La fila de una cuenta borrada se muestra —el like pasó— pero no linkea: su
+`handle` llega vacío a propósito, porque un `/u/` armado con un handle
+inventado es un 404.
+
 ## Historia del club
 
 `/historia` es la pantalla más larga de la app y la única puramente editorial.
