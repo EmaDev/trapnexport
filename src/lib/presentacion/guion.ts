@@ -39,11 +39,15 @@ export interface CategoriaVotacion {
   /** cuántos se llevan el premio: 1 casi siempre, 11 en el once ideal */
   cupos: number;
   totalVotos: number;
+  /** el video de la encuesta (un archivo o un link de YouTube), si tiene */
+  video?: string;
 }
 
 export interface OpcionesGuion {
   /** los ids de `CategoriaVotacion`, en el orden en que se anuncian */
   orden: string[];
+  /** el video de la encuesta en pantalla completa, en las que tienen uno */
+  video: boolean;
   /** la placa con los nominados antes de abrir el sobre */
   nominados: boolean;
   /** el "y el ganador es…" con redoble */
@@ -53,6 +57,7 @@ export interface OpcionesGuion {
 }
 
 export const OPCIONES_POR_DEFECTO: Omit<OpcionesGuion, "orden"> = {
+  video: true,
   nominados: true,
   suspenso: true,
   resultados: true,
@@ -178,6 +183,13 @@ const DEMORA_CATEGORIA = 900;
  *  no después. El presentador le baja el volumen a la música mientras habla. */
 const DEMORA_GANADOR = 1500;
 
+/** Lo que dice el locutor en la revelación: sólo el nombre, de a uno. El
+ *  signo de exclamación es para ElevenLabs: con él lo dice gritado, como un
+ *  locutor de estadio, y no con el tono de quien lee una lista. */
+function frasesDelGanador(ganadores: Ganador[]): string[] {
+  return ganadores.map((g) => `${g.texto}!`);
+}
+
 interface Base {
   id: string;
   efecto: Efecto;
@@ -194,6 +206,7 @@ export type Diapositiva =
   | (Base & { tipo: "standby" })
   | (Base & { tipo: "apertura" })
   | (Base & { tipo: "categoria"; categoria: CategoriaVotacion })
+  | (Base & { tipo: "video"; categoria: CategoriaVotacion; url: string })
   | (Base & { tipo: "nominados"; categoria: CategoriaVotacion })
   | (Base & { tipo: "suspenso"; categoria: CategoriaVotacion })
   | (Base & { tipo: "ganador"; categoria: CategoriaVotacion; ganadores: Ganador[] })
@@ -238,6 +251,21 @@ export function armarGuion(
       },
     ];
 
+    // El video va entre el anuncio del premio y los nominados: es el material
+    // que se votó (la compilación de goles), y el salón lo mira antes de ver
+    // entre quiénes se elige. Pasa sin efecto ni voz: el sonido es el del clip.
+    if (opciones.video && categoria.video) {
+      bloque.push({
+        tipo: "video",
+        id: `${categoria.id}:video`,
+        efecto: "ninguno",
+        rotulo: `${categoria.nombre} · video`,
+        categoria,
+        url: categoria.video,
+        ...marca,
+      });
+    }
+
     if (opciones.nominados) {
       bloque.push({
         tipo: "nominados",
@@ -267,7 +295,7 @@ export function armarGuion(
       // Sin ganadores la placa dice "Sin votos todavía" y la voz se calla: que
       // el locutor anuncie que no hay nada es peor que el silencio.
       locucion: ganadores.length
-        ? { frases: ganadores.map((g) => g.texto), demora: DEMORA_GANADOR }
+        ? { frases: frasesDelGanador(ganadores), demora: DEMORA_GANADOR }
         : undefined,
       rotulo: `${categoria.nombre} · ganador`,
       categoria,

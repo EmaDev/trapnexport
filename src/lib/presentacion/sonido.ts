@@ -117,7 +117,7 @@ const VOLUMEN = 0.9;
 /** Cuánto queda de la música mientras habla el locutor. Un cuarto y no cero:
  *  los aplausos de fondo son parte del anuncio; lo que no puede pasar es que le
  *  ganen al nombre. */
-const VOLUMEN_ATENUADO = 0.22;
+const VOLUMEN_ATENUADO = 0.15;
 
 export interface MotorSonido {
   /** crea y despierta el contexto; llamalo desde un handler de click */

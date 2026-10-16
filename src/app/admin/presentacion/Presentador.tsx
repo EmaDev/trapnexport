@@ -18,6 +18,7 @@ import {
   useMantenerPantallaEncendida,
   usePantallaCompleta,
 } from "@/lib/presentacion/pantalla";
+import { crearLocutorNeural, type EstadoVoz } from "@/lib/presentacion/locutor-neural";
 import { crearMotorSonido, type MotorSonido } from "@/lib/presentacion/sonido";
 import { crearLocutor, type Locutor } from "@/lib/presentacion/voz";
 import { Fondo, Placa } from "./Placas";
@@ -60,14 +61,12 @@ import { Fondo, Placa } from "./Placas";
 /** Cuánto se queda quieto el mouse antes de que se escondan los controles. */
 const OCULTAR_MS = 2600;
 
-/** Las viñetas que van con confeti: las dos placas de marco donde el salón
- *  aplaude y la revelación de un ganador que existe. Una categoría sin votos
- *  no lo lleva — el confeti sobre "Sin votos todavía" festeja la nada. */
-const celebra = (d: Diapositiva | undefined): boolean => {
-  if (!d) return false;
-  if (d.tipo === "apertura" || d.tipo === "cierre") return true;
-  return d.tipo === "ganador" && d.ganadores.length > 0;
-};
+/** Las viñetas que van con confeti: sólo la revelación de un ganador que
+ *  existe. Guardarlo para ese momento es lo que hace que se note; una
+ *  categoría sin votos no lo lleva — el confeti sobre "Sin votos todavía"
+ *  festeja la nada. */
+const celebra = (d: Diapositiva | undefined): boolean =>
+  d?.tipo === "ganador" && d.ganadores.length > 0;
 
 /* ── el componente ───────────────────────────────────────────────────────── */
 
@@ -89,6 +88,7 @@ export function Presentador({
   const [indiceAbierto, setIndiceAbierto] = useState(false);
   const [confeti, setConfeti] = useState(0);
   const [sinVoz, setSinVoz] = useState(false);
+  const [estadoVoz, setEstadoVoz] = useState<EstadoVoz | null>(null);
 
   const actual = guion[indice];
 
@@ -119,17 +119,29 @@ export function Presentador({
     // la maneja él y no cada llamada del presentador porque el que sabe cuándo
     // empieza y termina una locución es el motor de voz: la duración de una
     // frase depende de la voz que haya instalada, no del texto.
-    const locutor = crearLocutor((hablando) => motor.atenuar(hablando));
+    //
+    // La voz es la de ElevenLabs, y la del navegador queda de respaldo para
+    // las frases que no lleguen a cargarse.
+    const atenuar = (hablando: boolean) => motor.atenuar(hablando);
+    const respaldo = crearLocutor(atenuar);
+    const locutor = crearLocutorNeural(respaldo, atenuar);
     voz.current = locutor;
     locutor.desbloquear();
+
+    // Todas las frases del guion se generan ya, con la placa de espera puesta:
+    // cuando llegue el ganador, su nombre ya está en memoria.
+    locutor.precargar(
+      guion.flatMap((d) => d.locucion?.frases ?? []),
+      setEstadoVoz,
+    );
 
     void pantalla.entrar();
 
     // Las voces del sistema llegan asíncronas: preguntar en este tick daría
     // "no hay voz" siempre. Se pregunta una vez, con la placa de standby en
     // pantalla, que es cuando el que presenta todavía puede hacer algo al
-    // respecto.
-    const revision = window.setTimeout(() => setSinVoz(!locutor.hayVoz()), 1500);
+    // respecto. Es la voz de **respaldo**: sólo importa si ElevenLabs falla.
+    const revision = window.setTimeout(() => setSinVoz(!respaldo.hayVoz()), 1500);
 
     return () => {
       window.clearTimeout(revision);
@@ -292,7 +304,7 @@ export function Presentador({
       <Confetti
         fire={confeti}
         mode="center"
-        count={140}
+        count={60}
         colors={["#e8c46a", "#ffffff", "#b986ea", "#752eb8"]}
         respectReducedMotion
         className="z-20"
@@ -452,17 +464,27 @@ export function Presentador({
           <p className="text-white/35">
             → / espacio avanza · ← retrocede
             <br />
-            F pantalla completa · M sonido · S índice
+            F pantalla completa · M sonido · S índice · P pausa el video
           </p>
 
           {/* Sin voz en español la gala se proyecta igual, pero muda: nadie se
               enteraría hasta la primera categoría. Se avisa acá, en el standby,
               que es el único momento en que todavía se puede instalar una voz
               en el equipo o cambiar de máquina. */}
-          {sinVoz && (
+          {estadoVoz && estadoVoz.total > 0 && (
+            <p className="ml-auto mt-3 max-w-[30ch] text-white/45">
+              {estadoVoz.error
+                ? `Locutor: ${estadoVoz.listas} de ${estadoVoz.total} frases con voz de ElevenLabs. ${estadoVoz.error} Lo que falta lo dice la voz del equipo.`
+                : estadoVoz.listas < estadoVoz.total
+                  ? `Preparando el locutor… ${estadoVoz.listas} de ${estadoVoz.total}`
+                  : "Locutor listo."}
+            </p>
+          )}
+
+          {sinVoz && estadoVoz?.error && (
             <p className="ml-auto mt-3 max-w-[26ch] text-white/45">
-              Este equipo no tiene voces en español instaladas: el locutor no va
-              a anunciar los premios.
+              Este equipo no tiene voces en español instaladas: lo que no cargó
+              de ElevenLabs no se va a anunciar.
             </p>
           )}
         </div>

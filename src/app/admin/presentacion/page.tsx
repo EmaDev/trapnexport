@@ -1,4 +1,5 @@
 import { requireAdmin } from "@/lib/admin/auth";
+import { videoDeEncuesta } from "@/lib/contenido/media";
 import { getEncuestas } from "@/lib/contenido/queries";
 import type { CategoriaVotacion } from "@/lib/presentacion/guion";
 import { PageHeading } from "../PageHeading";
@@ -42,6 +43,7 @@ export default async function PresentacionPage() {
       // uno solo.
       cupos: e.multiple ? (e.maxOpciones ?? 1) : 1,
       totalVotos: e.totalVotos,
+      video: videoDeEncuesta(e.video, e.opciones),
     }));
 
   return (

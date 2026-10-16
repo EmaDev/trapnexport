@@ -16,7 +16,12 @@ export default async function EncuestasPage() {
         title="Encuestas"
         description="Borrador → abierta → cerrada. Una vez cerrada no se reabre: los votos ya se comunicaron."
       />
-      <EncuestasClient encuestas={encuestas} />
+      {/* Quién votó qué, sólo en `npm run dev`. `getVotantes` repite el mismo
+          corte del lado del servidor: esto sólo decide si se ve el botón. */}
+      <EncuestasClient
+        encuestas={encuestas}
+        verVotantes={process.env.NODE_ENV === "development"}
+      />
     </>
   );
 }

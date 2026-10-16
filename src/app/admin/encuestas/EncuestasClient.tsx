@@ -28,6 +28,7 @@ import type { EncuestaRow } from "@/lib/contenido/queries";
 import { ESTADO_ENCUESTA, type EncuestaInput, type OpcionInput } from "@/lib/contenido/types";
 import { JUGADORES } from "@/lib/trap-awards";
 import { ConfirmDialog, EstadoPill, FormModal, RowMenu } from "../Dialogs";
+import { VotantesModal } from "./VotantesModal";
 
 /** ABM de encuestas.
  *
@@ -95,13 +96,21 @@ const aPollOption = (o: OpcionInput, i: number): PollOption => {
   };
 };
 
-export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
+export function EncuestasClient({
+  encuestas,
+  verVotantes = false,
+}: {
+  encuestas: EncuestaRow[];
+  /** sólo en desarrollo: suma "Ver quién votó" al menú de la fila */
+  verVotantes?: boolean;
+}) {
   const { snack } = useSnackbar();
   const [pending, startTransition] = useTransition();
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<EncuestaInput>(VACIA);
   const [toDelete, setToDelete] = useState<EncuestaRow | null>(null);
+  const [votantesDe, setVotantesDe] = useState<EncuestaRow | null>(null);
   // El desplegable del plantel: `<details>` no anima la apertura, así que va
   // controlado y el panel se abre con una transición de `grid-template-rows`.
   const [plantelOpen, setPlantelOpen] = useState(false);
@@ -308,6 +317,11 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
           <RowMenu
             items={[
               { label: "Editar", onClick: () => openEdit(row) },
+              // Sólo en dev, y en cualquier estado: sirve para revisar los
+              // votos mientras la encuesta sigue abierta.
+              ...(verVotantes
+                ? [{ label: "Ver quién votó (dev)", onClick: () => setVotantesDe(row) }]
+                : []),
               // El orden se cambia acá y no con un número en el formulario:
               // mover una fila es la operación de todos los días y abrir un
               // modal para escribir un puesto obliga a saber de memoria el de
@@ -653,6 +667,10 @@ export function EncuestasClient({ encuestas }: { encuestas: EncuestaRow[] }) {
         <p className="text-sm font-medium">{toDelete?.pregunta}</p>
         <p className="mt-1 text-sm text-muted">{toDelete?.totalVotos} votos emitidos</p>
       </ConfirmDialog>
+
+      {verVotantes && (
+        <VotantesModal encuesta={votantesDe} onClose={() => setVotantesDe(null)} />
+      )}
     </>
   );
 }

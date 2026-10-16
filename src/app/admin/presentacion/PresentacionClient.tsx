@@ -61,6 +61,7 @@ export function PresentacionClient({ categorias }: { categorias: CategoriaVotaci
   );
 
   const sinVotos = seleccionadas.filter((id) => (porId.get(id)?.totalVotos ?? 0) === 0);
+  const conVideo = seleccionadas.filter((id) => porId.get(id)?.video).length;
 
   const alternar = (id: string) =>
     setElegidas((previas) => {
@@ -181,6 +182,18 @@ export function PresentacionClient({ categorias }: { categorias: CategoriaVotaci
 
         <div className="mt-4 flex flex-col gap-3">
           <Switch
+            checked={opciones.video}
+            onChange={(v) => setOpciones((o) => ({ ...o, video: v }))}
+            label="Video en pantalla completa"
+            description={`Después de anunciar el premio, el video de la encuesta de borde a borde. P lo pausa. ${
+              conVideo === 0
+                ? "Ninguna categoría seleccionada tiene video."
+                : conVideo === 1
+                  ? "Una categoría seleccionada tiene video."
+                  : `${conVideo} categorías seleccionadas tienen video.`
+            }`}
+          />
+          <Switch
             checked={opciones.nominados}
             onChange={(v) => setOpciones((o) => ({ ...o, nominados: v }))}
             label="Placa de nominados"
@@ -258,6 +271,7 @@ export function PresentacionClient({ categorias }: { categorias: CategoriaVotaci
                           </>
                         )}
                         {categoria.cupos > 1 && ` · ${categoria.cupos} cupos`}
+                        {categoria.video && " · con video"}
                       </span>
                     }
                   />
@@ -298,6 +312,7 @@ export function PresentacionClient({ categorias }: { categorias: CategoriaVotaci
             ["←", "Volver una viñeta"],
             ["F", "Entrar o salir de pantalla completa"],
             ["M", "Silenciar el sonido"],
+            ["P", "Pausar o seguir el video"],
             ["S", "Abrir el índice y saltar a una viñeta"],
             ["Esc", "Salir de pantalla completa; otra vez, terminar"],
           ].map(([tecla, que]) => (

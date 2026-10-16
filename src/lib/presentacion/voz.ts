@@ -1,5 +1,9 @@
 /** El locutor de la gala: la voz grave que dice el premio y el ganador.
  *
+ *  Hoy es la voz **de respaldo**: la principal es la de ElevenLabs
+ *  (`locutor-neural.ts`), y esta dice sólo las frases que no llegaron a
+ *  cargarse de ahí.
+ *
  *  Usa `speechSynthesis`, la síntesis de voz que ya trae el navegador, por las
  *  mismas tres razones por las que `sonido.ts` no tiene ni un `.mp3`: no
  *  descarga nada en el wifi del salón, no mete en el repo un audio con dueño, y

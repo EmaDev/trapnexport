@@ -1,9 +1,10 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { StarIcon, TrophyIcon } from "@/components/atoms/icons";
-import { avatarUrl } from "@/lib/media";
+import { embedYoutube, idYoutube } from "@/lib/contenido/media";
 import type { Diapositiva, Ganador } from "@/lib/presentacion/guion";
 import { EDICION } from "@/lib/trap-awards";
 
@@ -118,58 +119,6 @@ function Centro({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** La ficha de una persona: avatar circular y nombre. La usan nominados y
- *  ganadores; cambia el tamaño y el brillo, no la forma, para que el salón
- *  reconozca en la placa del ganador la misma ficha que vio en la de
- *  nominados. */
-function Ficha({
-  texto,
-  tam,
-  destacada = false,
-  pie,
-}: {
-  texto: string;
-  /** el lado del avatar, en unidades CSS */
-  tam: string;
-  destacada?: boolean;
-  pie?: string;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col items-center gap-[0.6em]">
-      <span className="relative" style={{ width: tam, height: tam }}>
-        {destacada && (
-          <span
-            aria-hidden
-            className="absolute inset-[-18%] rounded-full blur-2xl"
-            style={{ background: "radial-gradient(circle, rgba(232,196,106,0.55), transparent 70%)" }}
-          />
-        )}
-        {/* eslint-disable-next-line @next/next/no-img-element -- data-URI generado */}
-        <img
-          src={avatarUrl(texto)}
-          alt=""
-          className="relative h-full w-full rounded-full object-cover"
-          style={{
-            border: destacada ? `3px solid ${ORO}` : "2px solid rgba(255,255,255,0.18)",
-          }}
-        />
-      </span>
-      <p
-        className="max-w-[14ch] font-semibold leading-tight"
-        style={{
-          fontSize: destacada ? "clamp(1rem,2.4vw,2rem)" : "clamp(0.8rem,1.5vw,1.35rem)",
-          color: destacada ? ORO : "rgba(255,255,255,0.88)",
-        }}
-      >
-        {texto}
-      </p>
-      {pie && (
-        <p className="text-[clamp(0.65rem,1.1vw,0.95rem)] text-white/45">{pie}</p>
-      )}
-    </div>
-  );
-}
-
 /** El texto de votos de un ganador.
  *
  *  El porcentaje se muestra sólo cuando la categoría es de un solo cupo. En el
@@ -205,6 +154,104 @@ const subir = (reducido: boolean) => ({
     transition: { duration: reducido ? 0 : 0.55, ease: [0.16, 1, 0.3, 1] as const },
   },
 });
+
+/* ── el video ────────────────────────────────────────────────────────────── */
+
+/** El video de la encuesta, de borde a borde y arrancando solo.
+ *
+ *  Las zonas de click del presentador quedan **encima** del video, a
+ *  propósito: si el click llegara al reproductor, el foco se iría adentro del
+ *  iframe y el clicker dejaría de avanzar la gala. Por eso la pausa va por
+ *  teclado (`P`) y no por los controles del reproductor.
+ *
+ *  Si el navegador no deja arrancar con sonido, el archivo arranca mudo y la
+ *  primera `P` le devuelve el sonido: la tecla cuenta como gesto del usuario.
+ */
+function PlacaVideo({ url }: { url: string }) {
+  const id = idYoutube(url);
+  const video = useRef<HTMLVideoElement>(null);
+  const iframe = useRef<HTMLIFrameElement>(null);
+  /** el estado del iframe de YouTube, que no avisa cuando cambia */
+  const pausadoYoutube = useRef(false);
+  const [enPausa, setEnPausa] = useState(false);
+
+  useEffect(() => {
+    const v = video.current;
+    if (!v) return;
+    v.play().catch(() => {
+      v.muted = true;
+      v.play().catch(() => setEnPausa(true));
+    });
+  }, []);
+
+  const alternar = useCallback(() => {
+    const v = video.current;
+    if (v) {
+      if (v.paused || v.muted) {
+        v.muted = false;
+        void v.play();
+      } else {
+        v.pause();
+      }
+      return;
+    }
+
+    // El reproductor de YouTube se maneja por mensajes: es lo que habilita
+    // `enablejsapi=1` sin tener que cargar la librería del iframe API.
+    const destino = iframe.current?.contentWindow;
+    if (!destino) return;
+    pausadoYoutube.current = !pausadoYoutube.current;
+    destino.postMessage(
+      JSON.stringify({
+        event: "command",
+        func: pausadoYoutube.current ? "pauseVideo" : "playVideo",
+        args: [],
+      }),
+      "*",
+    );
+    setEnPausa(pausadoYoutube.current);
+  }, []);
+
+  useEffect(() => {
+    const alTeclear = (e: KeyboardEvent) => {
+      if (e.key === "p" || e.key === "P") alternar();
+    };
+    window.addEventListener("keydown", alTeclear);
+    return () => window.removeEventListener("keydown", alTeclear);
+  }, [alternar]);
+
+  return (
+    <div className="relative h-full w-full bg-black">
+      {id ? (
+        <iframe
+          ref={iframe}
+          src={`${embedYoutube(id)}&autoplay=1&controls=0&enablejsapi=1&modestbranding=1&iv_load_policy=3`}
+          title="Video de la categoría"
+          allow="autoplay; encrypted-media; fullscreen"
+          className="pointer-events-none absolute inset-0 h-full w-full border-0"
+        />
+      ) : (
+        <video
+          ref={video}
+          src={url}
+          playsInline
+          className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+          onPlay={() => setEnPausa(false)}
+          onPause={() => setEnPausa(true)}
+        />
+      )}
+
+      {enPausa && (
+        <p
+          className="absolute left-1/2 top-[clamp(1rem,4vh,2.5rem)] -translate-x-1/2 rounded-full bg-black/60 px-[1.2em] py-[0.5em] text-[clamp(0.7rem,1.2vw,1rem)] uppercase text-white/80 backdrop-blur"
+          style={{ letterSpacing: "0.25em" }}
+        >
+          En pausa · P para seguir
+        </p>
+      )}
+    </div>
+  );
+}
 
 /* ── las placas ──────────────────────────────────────────────────────────── */
 
@@ -328,12 +375,16 @@ export function Placa({
         </motion.div>
       );
 
+    /* ── el video de la encuesta ─────────────────────────────────────────── */
+    case "video":
+      return <PlacaVideo url={diapositiva.url} />;
+
     /* ── los nominados ───────────────────────────────────────────────────── */
     case "nominados": {
       const { opciones, nombre, descripcion } = diapositiva.categoria;
-      // Con más de doce nominados —el plantel entero son dieciocho— las fichas
-      // con avatar no entran sin achicarse hasta ser ilegibles de lejos. A
-      // partir de ahí se muestran como una grilla de nombres.
+      // Los nominados van sólo con el nombre, en grande: de lejos se lee mejor
+      // que una ficha con avatar. Con más de doce —el plantel entero son
+      // dieciocho— pasan a una grilla de columnas parejas para que entren.
       const enGrilla = opciones.length > 12;
 
       return (
@@ -356,19 +407,35 @@ export function Placa({
               variants={item}
               className={
                 enGrilla
-                  ? "grid w-full max-w-[85vw] grid-cols-2 gap-x-[clamp(1rem,4vw,4rem)] gap-y-[clamp(0.4rem,1.4vh,1rem)] sm:grid-cols-3"
-                  : "flex flex-wrap items-start justify-center gap-[clamp(1rem,3vw,3rem)]"
+                  ? "grid w-full max-w-[88vw] grid-cols-2 gap-x-[clamp(1rem,4vw,4rem)] gap-y-[clamp(0.5rem,1.8vh,1.4rem)] sm:grid-cols-3"
+                  : "flex max-w-[88vw] flex-wrap items-center justify-center gap-x-[clamp(1.5rem,4vw,4.5rem)] gap-y-[clamp(0.75rem,2.5vh,2rem)]"
               }
             >
               {opciones.map((o) => (
-                <li key={o.id} className={enGrilla ? "min-w-0" : ""}>
-                  {enGrilla ? (
-                    <span className="block truncate text-[clamp(0.95rem,2.1vw,1.7rem)] font-medium text-white/85">
-                      {o.texto}
-                    </span>
-                  ) : (
-                    <Ficha texto={o.texto} tam="clamp(4rem,9vw,8rem)" />
-                  )}
+                <li
+                  key={o.id}
+                  className={
+                    enGrilla
+                      ? "flex min-w-0 items-baseline gap-[0.45em] text-[clamp(1.1rem,2.7vw,2.3rem)]"
+                      : "flex items-baseline gap-[0.4em] text-[clamp(1.6rem,4.6vw,4.2rem)]"
+                  }
+                >
+                  {/* La viñeta dorada separa un nombre del otro: sin ella, en
+                      mayúsculas y en negrita, los nombres se pegan y se leen
+                      como uno solo. */}
+                  <span aria-hidden className="shrink-0 leading-none" style={{ color: ORO }}>
+                    •
+                  </span>
+                  <span
+                    className={
+                      enGrilla
+                        ? "min-w-0 truncate font-bold uppercase leading-tight text-white/90"
+                        : "font-black uppercase leading-[1.05] text-white"
+                    }
+                    style={{ letterSpacing: "-0.01em" }}
+                  >
+                    {o.texto}
+                  </span>
                 </li>
               ))}
             </motion.ul>
@@ -460,14 +527,11 @@ export function Placa({
         );
       }
 
-      // Un solo ganador manda la placa entera; varios (el once ideal) van en
-      // grilla y el tamaño de ficha baja con la cantidad.
+      // Sólo el nombre, sin avatar. Un solo ganador manda la placa entera;
+      // varios (el once ideal) van en grilla y la letra baja con la cantidad.
       const uno = ganadores.length === 1;
-      const tamFicha = uno
-        ? "clamp(8rem,20vw,18rem)"
-        : ganadores.length <= 4
-          ? "clamp(5rem,11vw,10rem)"
-          : "clamp(3.5rem,7vw,6.5rem)";
+      const tamNombre =
+        ganadores.length <= 4 ? "clamp(1.6rem,4.2vw,3.6rem)" : "clamp(1.1rem,2.6vw,2.2rem)";
 
       return (
         <motion.div className="h-full w-full" {...vars}>
@@ -494,26 +558,8 @@ export function Placa({
                 variants={item}
                 className="flex flex-col items-center gap-[clamp(0.75rem,2vh,1.5rem)]"
               >
-                <span className="relative" style={{ width: tamFicha, height: tamFicha }}>
-                  <span
-                    aria-hidden
-                    className="absolute inset-[-20%] rounded-full blur-3xl"
-                    style={{
-                      background:
-                        "radial-gradient(circle, rgba(232,196,106,0.5), transparent 70%)",
-                    }}
-                  />
-                  {/* eslint-disable-next-line @next/next/no-img-element -- data-URI generado */}
-                  <img
-                    src={avatarUrl(ganadores[0].texto)}
-                    alt=""
-                    className="relative h-full w-full rounded-full"
-                    style={{ border: `4px solid ${ORO}` }}
-                  />
-                </span>
-
                 <h2
-                  className="font-black uppercase leading-[0.95] text-[clamp(2.2rem,9vw,8rem)]"
+                  className="font-black uppercase leading-[0.95] text-[clamp(2.8rem,11vw,10rem)]"
                   style={{
                     color: ORO,
                     letterSpacing: "-0.02em",
@@ -530,16 +576,24 @@ export function Placa({
             ) : (
               <motion.ul
                 variants={item}
-                className="flex max-w-[88vw] flex-wrap items-start justify-center gap-x-[clamp(1rem,3vw,2.5rem)] gap-y-[clamp(1rem,3vh,2rem)]"
+                className="flex max-w-[88vw] flex-wrap items-start justify-center gap-x-[clamp(1.5rem,4vw,4rem)] gap-y-[clamp(1rem,3vh,2rem)]"
               >
                 {ganadores.map((g) => (
-                  <li key={g.opcionId}>
-                    <Ficha
-                      texto={g.texto}
-                      tam={tamFicha}
-                      destacada
-                      pie={votosLabel(g, categoria.cupos)}
-                    />
+                  <li key={g.opcionId} className="flex flex-col items-center gap-[0.3em]">
+                    <span
+                      className="font-black uppercase leading-[1.05]"
+                      style={{
+                        fontSize: tamNombre,
+                        color: ORO,
+                        letterSpacing: "-0.01em",
+                        textShadow: "0 0 40px rgba(232,196,106,0.3)",
+                      }}
+                    >
+                      {g.texto}
+                    </span>
+                    <span className="text-[clamp(0.65rem,1.1vw,0.95rem)] text-white/45">
+                      {votosLabel(g, categoria.cupos)}
+                    </span>
                   </li>
                 ))}
               </motion.ul>
