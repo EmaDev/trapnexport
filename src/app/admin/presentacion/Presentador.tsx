@@ -19,9 +19,15 @@ import {
   usePantallaCompleta,
 } from "@/lib/presentacion/pantalla";
 import { crearLocutorNeural, type EstadoVoz } from "@/lib/presentacion/locutor-neural";
+import {
+  abrirReceptor,
+  alListoAdmin,
+  type Comando,
+  type Receptor,
+} from "@/lib/presentacion/remoto";
 import { crearMotorSonido, type MotorSonido } from "@/lib/presentacion/sonido";
 import { crearLocutor, type Locutor } from "@/lib/presentacion/voz";
-import { Fondo, Placa } from "./Placas";
+import { EVENTO_PAUSA_VIDEO, Fondo, Placa } from "./Placas";
 
 /** El presentador: la pantalla completa que se proyecta en la gala.
  *
@@ -89,6 +95,8 @@ export function Presentador({
   const [confeti, setConfeti] = useState(0);
   const [sinVoz, setSinVoz] = useState(false);
   const [estadoVoz, setEstadoVoz] = useState<EstadoVoz | null>(null);
+  /** `null` mientras conecta, `true` conectado, o el motivo por el que no. */
+  const [remoto, setRemoto] = useState<true | string | null>(null);
 
   const actual = guion[indice];
 
@@ -181,6 +189,7 @@ export function Presentador({
   useEffect(() => {
     sonido.current?.silenciar(silencio);
     voz.current?.silenciar(silencio);
+    receptor.current?.silenciar(silencio);
   }, [silencio]);
 
   /* ── navegación ────────────────────────────────────────────────────────── */
@@ -202,6 +211,73 @@ export function Presentador({
 
   const avanzar = useCallback(() => ir(indice + 1), [ir, indice]);
   const retroceder = useCallback(() => ir(indice - 1), [ir, indice]);
+
+  /* ── control remoto (el celular) ───────────────────────────────────────── */
+
+  const receptor = useRef<Receptor | null>(null);
+
+  /** El comando del celular se resuelve con el estado **de este render**: la
+   *  suscripción se abre una sola vez y, sin el ref, "siguiente" avanzaría
+   *  siempre desde la viñeta en la que se abrió. */
+  const alComando = useRef<(c: Comando) => void>(() => {});
+  useEffect(() => {
+    alComando.current = (c) => {
+      switch (c.accion) {
+        case "siguiente":
+          avanzar();
+          break;
+        case "anterior":
+          retroceder();
+          break;
+        case "ir":
+          if (typeof c.indice === "number") ir(c.indice);
+          break;
+        case "pausa":
+          window.dispatchEvent(new Event(EVENTO_PAUSA_VIDEO));
+          break;
+        case "silencio":
+          setSilencio((s) => !s);
+          break;
+      }
+    };
+  });
+
+  useEffect(() => {
+    let abierto: Receptor | null = null;
+
+    // Espera a que el SDK restaure la sesión: preguntar antes daría "sin
+    // sesión" en cada apertura.
+    const soltar = alListoAdmin((usuario, esAdmin) => {
+      if (abierto) return;
+      if (!usuario || !esAdmin) {
+        setRemoto(
+          "Este navegador no tiene sesión de admin en Firebase. Cerrá sesión del panel y volvé a entrar.",
+        );
+        return;
+      }
+      abierto = abrirReceptor(
+        guion,
+        indice,
+        (c) => alComando.current(c),
+        setRemoto,
+        () => setRemoto(true),
+      );
+      receptor.current = abierto;
+    });
+
+    return () => {
+      soltar();
+      abierto?.cerrar();
+      receptor.current = null;
+    };
+    // Una sesión por apertura del presentador: el guion no cambia mientras se
+    // proyecta, y el índice inicial sólo importa al abrir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    receptor.current?.mover(indice);
+  }, [indice]);
 
   /* ── teclado ───────────────────────────────────────────────────────────── */
 
@@ -471,6 +547,14 @@ export function Presentador({
               enteraría hasta la primera categoría. Se avisa acá, en el standby,
               que es el único momento en que todavía se puede instalar una voz
               en el equipo o cambiar de máquina. */}
+          <p className="ml-auto mt-3 max-w-[30ch] text-white/45">
+            {remoto === true
+              ? "Control remoto conectado: abrí /admin/control en el celular."
+              : remoto === null
+                ? "Conectando el control remoto…"
+                : `Control remoto no disponible. ${remoto}`}
+          </p>
+
           {estadoVoz && estadoVoz.total > 0 && (
             <p className="ml-auto mt-3 max-w-[30ch] text-white/45">
               {estadoVoz.error

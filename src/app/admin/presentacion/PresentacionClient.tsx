@@ -19,6 +19,7 @@ import {
   type CategoriaVotacion,
 } from "@/lib/presentacion/guion";
 import { Presentador } from "./Presentador";
+import { QrControl } from "./QrControl";
 
 /** La pantalla de armado: qué se proyecta y en qué orden, y el botón que abre
  *  la presentación.
@@ -138,6 +139,11 @@ export function PresentacionClient({ categorias }: { categorias: CategoriaVotaci
             Presentar
           </Button>
         </div>
+      </Card>
+
+      {/* ── el celular como control ─────────────────────────────────────── */}
+      <Card padding="md">
+        <QrControl />
       </Card>
 
       {/* ── qué hay adentro ─────────────────────────────────────────────── */}

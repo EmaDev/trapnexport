@@ -70,6 +70,11 @@ export const COL = {
    *  servidor (`lib/social/notify.ts`) y los lee `social/queries.ts`. Ver
    *  `NotificacionDoc`. */
   notificacion: `${PREFIX}-notification`,
+
+  /* ── la gala en vivo (`lib/presentacion/remoto.ts`) ─────────────────────── */
+  /** el control remoto de la presentación: lo que se proyecta y los comandos
+   *  que manda el celular. La escribe el navegador del admin. */
+  presentacion: `${PREFIX}-presentacion`,
 } as const;
 
 /** La subcolección de mensajes: `trapnexport-conversacion/{id}/mensaje/{id}`.

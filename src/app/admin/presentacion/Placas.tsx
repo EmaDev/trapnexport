@@ -157,6 +157,10 @@ const subir = (reducido: boolean) => ({
 
 /* ── el video ────────────────────────────────────────────────────────────── */
 
+/** El evento que pausa o sigue el video, para el control remoto: el celular no
+ *  puede apretar la `P` del teclado de la proyección. */
+export const EVENTO_PAUSA_VIDEO = "gala:pausa-video";
+
 /** El video de la encuesta, de borde a borde y arrancando solo.
  *
  *  Las zonas de click del presentador quedan **encima** del video, a
@@ -207,7 +211,7 @@ function PlacaVideo({ url }: { url: string }) {
         func: pausadoYoutube.current ? "pauseVideo" : "playVideo",
         args: [],
       }),
-      "*",
+      "https://www.youtube-nocookie.com",
     );
     setEnPausa(pausadoYoutube.current);
   }, []);
@@ -217,7 +221,11 @@ function PlacaVideo({ url }: { url: string }) {
       if (e.key === "p" || e.key === "P") alternar();
     };
     window.addEventListener("keydown", alTeclear);
-    return () => window.removeEventListener("keydown", alTeclear);
+    window.addEventListener(EVENTO_PAUSA_VIDEO, alternar);
+    return () => {
+      window.removeEventListener("keydown", alTeclear);
+      window.removeEventListener(EVENTO_PAUSA_VIDEO, alternar);
+    };
   }, [alternar]);
 
   return (

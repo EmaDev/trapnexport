@@ -9,6 +9,7 @@ import {
   DashboardIcon,
   ImageIcon,
   NewsIcon,
+  PlayIcon,
   PollIcon,
   PostsIcon,
   PresentIcon,
@@ -64,6 +65,7 @@ const SECTIONS: SidebarSection[] = [
     title: "En vivo",
     links: [
       { label: "Presentación", href: "/admin/presentacion", icon: <PresentIcon /> },
+      { label: "Control remoto", href: "/admin/control", icon: <PlayIcon /> },
     ],
   },
   // Tampoco es "Contenido": lo de arriba se publica para que alguien lo

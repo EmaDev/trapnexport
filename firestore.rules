@@ -313,6 +313,23 @@ service cloud.firestore {
      *  es asunto de los destinatarios. */
     match /trapnexport-difusion/{id} { allow read, write: if false; }
 
+    /* ── la gala en vivo ─────────────────────────────────────────────────── */
+
+    /*  El control remoto de la presentación (`lib/presentacion/remoto.ts`).
+     *  Lo escriben **dos navegadores**, la proyección y el celular del que
+     *  presenta, sin pasar por el servidor: es lo que hace que el toque llegue
+     *  en tiempo real. Por eso la regla es la barrera y no un respaldo: sólo el
+     *  claim `admin`. Abierta a cualquier sesión, cualquiera con la app podría
+     *  revelar al ganador desde su casa. */
+    match /trapnexport-presentacion/{id} {
+      allow read, write: if isAdmin();
+
+      match /comando/{comandoId} {
+        allow read, create, delete: if isAdmin();
+        allow update: if false;
+      }
+    }
+
     /* ── todo lo demás ───────────────────────────────────────────────────── */
 
     /*  Ya no queda dominio en memoria: todo está en Firestore y con regla
